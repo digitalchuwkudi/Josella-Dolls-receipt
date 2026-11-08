@@ -322,104 +322,157 @@ export default function App() {
   };
 
   // PDF Download Function: Converts strictly the Live Receipt Preview into a pristine A4 PDF
-  const handleDownloadPDF = async () => {
-    if (isGeneratingPDF) return;
+  const handleDownloadPDF = async (): Promise<boolean> => {
+    if (isGeneratingPDF) return false;
     handleSaveToHistory();
     setIsGeneratingPDF(true);
     showToast('Generating official PDF receipt document...');
 
-    // 1. Locate the live receipt preview element
-    const sourceElement =
-      document.getElementById('receipt-paper') ||
-      document.getElementById('receiptContainer') ||
-      document.getElementById('receipt') ||
-      document.querySelector('.receipt-card');
-
-    if (!sourceElement) {
-      setIsGeneratingPDF(false);
-      showToast('Could not locate receipt preview element. Please try again.');
-      return;
-    }
-
-    // 2. Create a temporary render container to hold a clone of ONLY the receipt paper.
-    // Positioned fixed behind the viewport (z-index -99999) with explicit A4 width (800px)
-    // so it renders with 100% visibility to html2canvas even if the preview tab is hidden on mobile.
-    const tempWrapper = document.createElement('div');
-    tempWrapper.id = 'temp-pdf-render-container';
-    tempWrapper.style.position = 'fixed';
-    tempWrapper.style.left = '0';
-    tempWrapper.style.top = '0';
-    tempWrapper.style.width = '800px';
-    tempWrapper.style.zIndex = '-99999';
-    tempWrapper.style.opacity = '1';
-    tempWrapper.style.pointerEvents = 'none';
-    tempWrapper.style.backgroundColor = '#ffffff';
-
-    // 3. Clone ONLY the actual receipt paper element
-    const clone = sourceElement.cloneNode(true) as HTMLElement;
-
-    // Remove any non-print UI controls or interactive elements inside the clone if present
-    const noPrintItems = clone.querySelectorAll('.no-print');
-    noPrintItems.forEach((el) => el.remove());
-
-    // Apply clean A4 portrait dimensions and explicit white background to the cloned receipt
-    clone.style.width = '800px';
-    clone.style.maxWidth = 'none';
-    clone.style.margin = '0';
-    clone.style.padding = '36px';
-    clone.style.display = 'block';
-    clone.style.visibility = 'visible';
-    clone.style.boxShadow = 'none';
-    clone.style.borderRadius = '0';
-    clone.style.border = '1px solid #e2e8f0';
-    clone.style.backgroundColor = '#ffffff';
-
-    tempWrapper.appendChild(clone);
-    document.body.appendChild(tempWrapper);
-
-    const safeOrderNum = (orderNumber || 'JD-2026-1001').replace(/[^a-zA-Z0-9_-]/g, '_');
-    const pdfFilename = `Josella_Dolls_Receipt_${safeOrderNum}.pdf`;
-
-    const opt = {
-      margin: 8,
-      filename: pdfFilename,
-      image: { type: 'jpeg' as const, quality: 0.98 },
-      html2canvas: {
-        scale: 2,
-        useCORS: true,
-        allowTaint: true,
-        logging: false,
-        width: 800,
-        windowWidth: 800,
-        scrollX: 0,
-        scrollY: 0
-      },
-      jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' as const }
-    };
+    let tempWrapper: HTMLDivElement | null = null;
+    let success = false;
 
     try {
-      await html2pdf().set(opt).from(clone).save();
-      showToast(`PDF Receipt ${pdfFilename} downloaded!`);
+      // STEP A — Identify the correct receipt
+      const sourceElement = document.getElementById('receipt-paper');
+      if (!sourceElement) {
+        showToast('Could not locate live receipt preview element.');
+        return false;
+      }
+
+      // STEP B — Handle hidden mobile previews
+      tempWrapper = document.createElement('div');
+      tempWrapper.id = 'temp-pdf-render-wrapper';
+      tempWrapper.style.position = 'fixed';
+      tempWrapper.style.left = '0';
+      tempWrapper.style.top = '0';
+      tempWrapper.style.width = '800px';
+      tempWrapper.style.zIndex = '-99999';
+      tempWrapper.style.opacity = '1';
+      tempWrapper.style.pointerEvents = 'none';
+      tempWrapper.style.backgroundColor = '#ffffff';
+
+      // Clone the actual receipt-paper element using cloneNode(true)
+      const clone = sourceElement.cloneNode(true) as HTMLElement;
+
+      // Remove original ID from clone to avoid duplicate IDs
+      clone.removeAttribute('id');
+
+      // Remove any non-printable elements inside clone if present
+      const noPrintItems = clone.querySelectorAll('.no-print');
+      noPrintItems.forEach((el) => el.remove());
+
+      // Set cloned receipt styles for crisp 800px A4 rendering
+      clone.style.width = '800px';
+      clone.style.maxWidth = 'none';
+      clone.style.minWidth = '800px';
+      clone.style.boxSizing = 'border-box';
+      clone.style.margin = '0';
+      clone.style.padding = '36px';
+      clone.style.display = 'block';
+      clone.style.visibility = 'visible';
+      clone.style.boxShadow = 'none';
+      clone.style.borderRadius = '0';
+      clone.style.border = '1px solid #e2e8f0';
+      clone.style.backgroundColor = '#ffffff';
+
+      tempWrapper.appendChild(clone);
+      document.body.appendChild(tempWrapper);
+
+      // STEP C — Wait for rendering (fonts and images)
+      if (document.fonts) {
+        try {
+          await document.fonts.ready;
+        } catch (fontErr) {
+          console.warn('Font loading check:', fontErr);
+        }
+      }
+
+      const images = Array.from(clone.querySelectorAll('img'));
+      if (images.length > 0) {
+        await Promise.all(
+          images.map(
+            (img) =>
+              new Promise<void>((resolve) => {
+                if (img.complete) resolve();
+                else {
+                  img.onload = () => resolve();
+                  img.onerror = () => resolve();
+                }
+              })
+          )
+        );
+      }
+
+      // STEP D — Generate the PDF configuration
+      const safeOrderNum = (orderNumber || 'JD-2026-1001').replace(/[^a-zA-Z0-9_-]/g, '_');
+      const fileName = `Josella_Dolls_Receipt_${safeOrderNum}.pdf`;
+
+      const opt = {
+        margin: 8,
+        filename: fileName,
+        image: { type: 'jpeg' as const, quality: 0.98 },
+        html2canvas: {
+          scale: 2,
+          useCORS: true,
+          allowTaint: true,
+          logging: false,
+          width: 800,
+          windowWidth: 800,
+          scrollX: 0,
+          scrollY: 0,
+          backgroundColor: '#ffffff'
+        },
+        jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' as const }
+      };
+
+      // STEP E — Download directly to device via Blob
+      const worker = html2pdf().set(opt).from(clone).toPdf();
+      const pdf = await worker.get('pdf');
+      const pdfBlob: Blob = pdf.output('blob');
+
+      if (!pdfBlob || pdfBlob.size === 0) {
+        throw new Error('Generated PDF Blob was empty');
+      }
+
+      const blobUrl = URL.createObjectURL(pdfBlob);
+      const downloadAnchor = document.createElement('a');
+      downloadAnchor.href = blobUrl;
+      downloadAnchor.download = fileName;
+      downloadAnchor.style.display = 'none';
+      document.body.appendChild(downloadAnchor);
+      downloadAnchor.click();
+      document.body.removeChild(downloadAnchor);
+
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 3000);
+
+      showToast(`PDF Receipt ${fileName} downloaded!`);
+      success = true;
     } catch (err) {
-      console.error('PDF Generation Error:', err);
+      console.error('PDF Download Error:', err);
       showToast('Failed to generate PDF. Please try again.');
+      success = false;
     } finally {
-      // 4. Clean up temporary DOM element and reset generating state
-      if (document.body.contains(tempWrapper)) {
+      if (tempWrapper && document.body.contains(tempWrapper)) {
         document.body.removeChild(tempWrapper);
       }
       setIsGeneratingPDF(false);
     }
+
+    return success;
   };
 
   // Send via WhatsApp
   const handleSendWhatsAppPDF = async () => {
-    await handleDownloadPDF();
+    const success = await handleDownloadPDF();
+    if (!success) {
+      showToast('WhatsApp share cancelled because PDF generation failed.');
+      return;
+    }
 
     let phoneNum = customerPhone.replace(/[^0-9]/g, '');
     const clientNameStr = customerName ? customerName : 'Valued Customer';
     
-    const message = `Hello ${clientNameStr},\n\nThank you for choosing *Josella Dolls Luxury Beauty, Esthetic & Spa Product and Equipment suppliers*!\n\nAttached is your official PDF Purchase Receipt (*${orderNumber}*).\nTotal Amount: *${formatCurrency(grandTotal, currency)}*\nPayment Status: *${orderStatus}*\n\nPlease let us know if you have any questions!\n\n— Josella Dolls (Cotonou, Benin Republic)`;
+    const message = `Hello ${clientNameStr},\n\nThank you for choosing *Josella Dolls Luxury Beauty, Esthetic & Spa Product and Equipment suppliers*!\n\nYour official PDF Purchase Receipt (*${orderNumber}*) has been downloaded to your device.\nTotal Amount: *${formatCurrency(grandTotal, currency)}*\nPayment Status: *${orderStatus}*\n\n(Note: Please attach the downloaded PDF receipt file from your device to this WhatsApp message).\n\nPlease let us know if you have any questions!\n\n— Josella Dolls (Cotonou, Benin Republic)`;
     
     const text = encodeURIComponent(message);
     let whatsappUrl = '';
@@ -435,12 +488,16 @@ export default function App() {
 
   // Send via Email
   const handleSendEmailPDF = async () => {
-    await handleDownloadPDF();
+    const success = await handleDownloadPDF();
+    if (!success) {
+      showToast('Email share cancelled because PDF generation failed.');
+      return;
+    }
 
     const clientNameStr = customerName ? customerName : 'Valued Customer';
     const subject = encodeURIComponent(`Official Purchase Receipt ${orderNumber} - Josella Dolls`);
     const body = encodeURIComponent(
-      `Dear ${clientNameStr},\n\nThank you for your order from Josella Dolls Luxury Beauty, Esthetic & Spa Product and Equipment suppliers.\n\nYour official PDF receipt (${orderNumber}.pdf) has been downloaded to your device and is ready to attach.\n\nSummary:\nOrder #: ${orderNumber}\nDate: ${orderDate}\nGrand Total: ${formatCurrency(grandTotal, currency)}\nStatus: ${orderStatus}\n\nWarm regards,\nJosella Dolls Team\nCotonou, Benin Republic\nWhatsApp: +229 90 08 34 61`
+      `Dear ${clientNameStr},\n\nThank you for your order from Josella Dolls Luxury Beauty, Esthetic & Spa Product and Equipment suppliers.\n\nYour official PDF receipt (${orderNumber}.pdf) has been downloaded to your device.\n\nSummary:\nOrder #: ${orderNumber}\nDate: ${orderDate}\nGrand Total: ${formatCurrency(grandTotal, currency)}\nStatus: ${orderStatus}\n\nPlease attach the downloaded PDF file (Josella_Dolls_Receipt_${orderNumber}.pdf) to this email before sending.\n\nWarm regards,\nJosella Dolls Team\nCotonou, Benin Republic\nWhatsApp: +229 90 08 34 61`
     );
 
     window.open(`mailto:?subject=${subject}&body=${body}`, '_blank');
