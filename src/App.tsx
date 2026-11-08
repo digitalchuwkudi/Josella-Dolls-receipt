@@ -321,26 +321,36 @@ export default function App() {
     }
   };
 
-  // Direct Download PDF File via html2pdf().set(opt).from(element).save()
+  // Direct Download PDF File with multi-selector lookup & print fallback
   const handleDownloadPDF = async () => {
     if (isGeneratingPDF) return;
     handleSaveToHistory();
     setIsGeneratingPDF(true);
     showToast('Generating official PDF receipt document...');
 
-    const element = document.getElementById('receipt-paper');
+    // Resilient element lookup across common IDs/classes
+    const element =
+      document.getElementById('receipt-paper') ||
+      document.getElementById('receiptContainer') ||
+      document.getElementById('receipt') ||
+      document.querySelector('.receipt-card') ||
+      document.querySelector('.receipt-preview');
+
     if (!element) {
       setIsGeneratingPDF(false);
+      showToast('Receipt element not found. Opening print view...');
+      window.print();
       return;
     }
 
     // Store original inline styles so we can restore them immediately after capture
-    const originalWidth = element.style.width;
-    const originalMaxWidth = element.style.maxWidth;
+    const htmlElement = element as HTMLElement;
+    const originalWidth = htmlElement.style.width;
+    const originalMaxWidth = htmlElement.style.maxWidth;
 
     // Temporarily expand width to standard A4 (800px) during capture so mobile/tablet screens capture full width
-    element.style.width = '800px';
-    element.style.maxWidth = 'none';
+    htmlElement.style.width = '800px';
+    htmlElement.style.maxWidth = 'none';
 
     const opt = {
       margin: 6,
@@ -360,15 +370,16 @@ export default function App() {
     };
 
     try {
-      await html2pdf().set(opt).from(element).save();
+      await html2pdf().set(opt).from(htmlElement).save();
       showToast(`PDF Receipt ${orderNumber}.pdf downloaded!`);
     } catch (err) {
       console.error('PDF Generation Error:', err);
-      showToast('Error generating PDF file');
+      showToast('PDF export fallback: opening print view to save...');
+      window.print();
     } finally {
       // Restore original element inline styles
-      element.style.width = originalWidth;
-      element.style.maxWidth = originalMaxWidth;
+      htmlElement.style.width = originalWidth;
+      htmlElement.style.maxWidth = originalMaxWidth;
 
       // CRITICAL: Always reset generating state so buttons work again immediately
       setIsGeneratingPDF(false);
