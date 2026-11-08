@@ -321,29 +321,49 @@ export default function App() {
     }
   };
 
-  // Direct Download PDF File directly from visible DOM
-  const handleDownloadPDF = async (): Promise<Blob | null> => {
-    if (isGeneratingPDF) return null;
+  // Direct Download PDF File (Robust Off-screen Capture for Mobile & Desktop)
+  const handleDownloadPDF = async () => {
     handleSaveToHistory();
     setIsGeneratingPDF(true);
     showToast('Generating official PDF receipt document...');
 
-    // If on mobile and currently viewing editor, temporarily show preview for capture
-    const wasEditorTab = activeTab === 'editor';
-    if (wasEditorTab) {
-      setActiveTab('preview');
-      await new Promise((r) => setTimeout(r, 150)); // Allow DOM layout repaint
-    }
+    // Safety timeout: Guarantee unlock state within 2.5 seconds
+    const safetyTimer = setTimeout(() => {
+      setIsGeneratingPDF(false);
+    }, 2500);
 
     const sourceElement = document.getElementById('receipt-paper');
     if (!sourceElement) {
+      clearTimeout(safetyTimer);
       setIsGeneratingPDF(false);
-      showToast('Could not locate live receipt preview element.');
-      return null;
+      showToast('Opening print dialog to save as PDF...');
+      window.print();
+      return;
     }
 
     const safeOrderNum = (orderNumber || 'JD-2026-1001').replace(/[^a-zA-Z0-9_-]/g, '_');
     const fileName = `Josella_Dolls_Receipt_${safeOrderNum}.pdf`;
+
+    // Create temporary off-screen container to ensure rendering works even when mobile preview tab is hidden
+    const container = document.createElement('div');
+    container.style.position = 'fixed';
+    container.style.left = '-9999px';
+    container.style.top = '0';
+    container.style.width = '800px';
+    container.style.backgroundColor = '#ffffff';
+    container.style.zIndex = '99999';
+    container.style.opacity = '1';
+    container.style.pointerEvents = 'none';
+
+    // Clone receipt paper
+    const clone = sourceElement.cloneNode(true) as HTMLElement;
+    clone.removeAttribute('id');
+    clone.style.width = '800px';
+    clone.style.maxWidth = 'none';
+    clone.style.minWidth = '800px';
+    clone.style.boxSizing = 'border-box';
+    container.appendChild(clone);
+    document.body.appendChild(container);
 
     const opt = {
       margin: 8,
@@ -355,85 +375,69 @@ export default function App() {
         allowTaint: true,
         logging: false,
         backgroundColor: '#ffffff',
-        scrollX: 0,
-        scrollY: 0
+        windowWidth: 800
       },
       jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' as const }
     };
 
     try {
-      if (document.fonts) {
-        try {
-          await document.fonts.ready;
-        } catch (e) {
-          console.warn('Font check error:', e);
-        }
+      // Wait for fonts & images inside clone to be ready
+      await document.fonts.ready;
+      const images = Array.from(clone.getElementsByTagName('img'));
+      await Promise.all(
+        images.map(
+          (img) =>
+            new Promise((resolve) => {
+              if (img.complete) resolve(true);
+              else {
+                img.onload = () => resolve(true);
+                img.onerror = () => resolve(true);
+              }
+            })
+        )
+      );
+      await new Promise((resolve) => setTimeout(resolve, 150));
+
+      // Generate PDF via html2pdf worker and get blob for direct device download
+      const worker = html2pdf().set(opt).from(clone).toPdf();
+      const pdfObj = await worker.get('pdf');
+      const blob = pdfObj.output('blob');
+
+      if (blob && blob.size > 0) {
+        const blobUrl = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = blobUrl;
+        link.download = fileName;
+        link.style.display = 'none';
+        document.body.appendChild(link);
+        link.click();
+        setTimeout(() => {
+          if (document.body.contains(link)) document.body.removeChild(link);
+          URL.revokeObjectURL(blobUrl);
+        }, 3000);
+        showToast(`Receipt ${fileName} downloaded!`);
+      } else {
+        await html2pdf().set(opt).from(clone).save();
+        showToast(`Receipt ${fileName} downloaded!`);
       }
-
-      // Generate PDF Blob using html2pdf worker
-      const worker = html2pdf().set(opt).from(sourceElement).toPdf();
-      const pdf = await worker.get('pdf');
-      const pdfBlob: Blob = pdf.output('blob');
-
-      if (!pdfBlob || pdfBlob.size === 0) {
-        throw new Error('Generated PDF Blob was empty');
-      }
-
-      // Trigger direct link file download
-      const blobUrl = URL.createObjectURL(pdfBlob);
-      const downloadAnchor = document.createElement('a');
-      downloadAnchor.href = blobUrl;
-      downloadAnchor.download = fileName;
-      downloadAnchor.style.display = 'none';
-      document.body.appendChild(downloadAnchor);
-      downloadAnchor.click();
-      document.body.removeChild(downloadAnchor);
-      setTimeout(() => URL.revokeObjectURL(blobUrl), 3000);
-
-      showToast(`PDF Receipt ${fileName} downloaded!`);
-      return pdfBlob;
     } catch (err) {
-      console.error('PDF Generation Error:', err);
+      console.warn('PDF export fallback:', err);
       showToast('Opening print dialog to save as PDF...');
       window.print();
-      return null;
     } finally {
-      if (wasEditorTab) {
-        setTimeout(() => setActiveTab('editor'), 600);
+      clearTimeout(safetyTimer);
+      if (document.body.contains(container)) {
+        document.body.removeChild(container);
       }
       setIsGeneratingPDF(false);
     }
   };
 
-  // Send via WhatsApp (SHARES ACTUAL VISUAL PDF FILE DIRECTLY TO WHATSAPP)
-  const handleSendWhatsAppPDF = async () => {
+  // Send via WhatsApp (DIRECT SYNCHRONOUS LAUNCH TO WHATSAPP - ZERO FILE MANAGERS)
+  const handleSendWhatsAppPDF = () => {
+    handleSaveToHistory();
     setShareModalOpen(false);
-    showToast('Preparing visual PDF receipt for WhatsApp...');
 
-    const pdfBlob = await handleDownloadPDF();
-
-    const safeOrderNum = (orderNumber || 'JD-2026-1001').replace(/[^a-zA-Z0-9_-]/g, '_');
-    const fileName = `Josella_Dolls_Receipt_${safeOrderNum}.pdf`;
-
-    // If native file sharing is supported (iOS, Android, & modern Web Share browsers)
-    if (pdfBlob && navigator.canShare) {
-      try {
-        const pdfFile = new File([pdfBlob], fileName, { type: 'application/pdf' });
-        if (navigator.canShare({ files: [pdfFile] })) {
-          await navigator.share({
-            files: [pdfFile],
-            title: `Josella Dolls Receipt ${orderNumber}`,
-            text: `Official Purchase Receipt for ${customerName || 'Valued Customer'} (${orderNumber})`
-          });
-          showToast('Shared visual PDF receipt to WhatsApp!');
-          return;
-        }
-      } catch (shareErr) {
-        console.warn('Native Web Share file export failed or cancelled:', shareErr);
-      }
-    }
-
-    // Fallback for browsers without native file sharing
     let phoneNum = customerPhone.replace(/[^0-9]/g, '');
     const clientNameStr = customerName ? customerName : 'Valued Customer';
     
@@ -446,50 +450,39 @@ export default function App() {
     message += `Total Amount: *${formatCurrency(grandTotal, currency)}*\n`;
     message += `Payment Status: *${orderStatus}*\n`;
     message += `-----------------------------------\n`;
-    message += `(The official PDF receipt ${fileName} has been saved to your device. Attach it to this chat).\n`;
+    message += `ITEMS:\n`;
+    items.forEach((item, idx) => {
+      if (item.description || item.unitPrice > 0) {
+        message += `${idx + 1}. ${item.description || 'Item'} (x${item.quantity}) - ${formatCurrency(item.quantity * item.unitPrice, currency)}\n`;
+      }
+    });
+    message += `-----------------------------------\n`;
+    message += `WhatsApp: +229 90 08 34 61 | Cotonou, Benin Republic\n`;
+    message += `Thank you for shopping with Josella Dolls!`;
 
     const text = encodeURIComponent(message);
     let whatsappUrl = phoneNum.length >= 8 
       ? `https://wa.me/${phoneNum}?text=${text}`
       : `https://wa.me/22990083461?text=${text}`;
 
+    // Opens WhatsApp directly on mobile or desktop without opening any file manager or picker
     window.open(whatsappUrl, '_blank');
+    showToast('Opening WhatsApp...');
   };
 
-  // Send via Email (SHARES VISUAL PDF FILE)
-  const handleSendEmailPDF = async () => {
+  // Send via Email (DIRECT LAUNCH)
+  const handleSendEmailPDF = () => {
+    handleSaveToHistory();
     setShareModalOpen(false);
-    showToast('Preparing visual PDF receipt for Email...');
-
-    const pdfBlob = await handleDownloadPDF();
-
-    const safeOrderNum = (orderNumber || 'JD-2026-1001').replace(/[^a-zA-Z0-9_-]/g, '_');
-    const fileName = `Josella_Dolls_Receipt_${safeOrderNum}.pdf`;
-
-    if (pdfBlob && navigator.canShare) {
-      try {
-        const pdfFile = new File([pdfBlob], fileName, { type: 'application/pdf' });
-        if (navigator.canShare({ files: [pdfFile] })) {
-          await navigator.share({
-            files: [pdfFile],
-            title: `Official Purchase Receipt ${orderNumber} - Josella Dolls`,
-            text: `Official Purchase Receipt for ${customerName || 'Valued Customer'} (${orderNumber})`
-          });
-          showToast('Shared visual PDF receipt!');
-          return;
-        }
-      } catch (e) {
-        console.warn('Share check:', e);
-      }
-    }
 
     const clientNameStr = customerName ? customerName : 'Valued Customer';
     const subject = encodeURIComponent(`Official Purchase Receipt ${orderNumber} - Josella Dolls`);
     const body = encodeURIComponent(
-      `Dear ${clientNameStr},\n\nThank you for your order from Josella Dolls Luxury Beauty, Esthetic & Spa Product and Equipment suppliers.\n\nSummary:\nOrder #: ${orderNumber}\nDate: ${orderDate}\nGrand Total: ${formatCurrency(grandTotal, currency)}\nStatus: ${orderStatus}\n\nThe official PDF receipt (${fileName}) has been saved to your device downloads folder.\n\nWarm regards,\nJosella Dolls Team\nCotonou, Benin Republic\nWhatsApp: +229 90 08 34 61`
+      `Dear ${clientNameStr},\n\nThank you for your order from Josella Dolls Luxury Beauty, Esthetic & Spa Product and Equipment suppliers.\n\nSummary:\nOrder #: ${orderNumber}\nDate: ${orderDate}\nGrand Total: ${formatCurrency(grandTotal, currency)}\nStatus: ${orderStatus}\n\nWarm regards,\nJosella Dolls Team\nCotonou, Benin Republic\nWhatsApp: +229 90 08 34 61`
     );
 
     window.open(`mailto:?subject=${subject}&body=${body}`, '_blank');
+    showToast('Opening Email app...');
   };
 
   // Quick Copy Text Summary
@@ -622,11 +615,10 @@ export default function App() {
 
               <button
                 onClick={handleDownloadPDF}
-                disabled={isGeneratingPDF}
-                className="flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-bold text-white bg-pink-700 hover:bg-pink-800 rounded-lg shadow-sm transition-all whitespace-nowrap disabled:opacity-50"
+                className="flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-bold text-white bg-pink-700 hover:bg-pink-800 active:bg-pink-900 rounded-lg shadow-sm transition-all whitespace-nowrap"
               >
                 <FileDown className="w-4 h-4" />
-                {isGeneratingPDF ? 'PDF...' : 'Download PDF'}
+                {isGeneratingPDF ? 'Generating PDF...' : 'Download PDF'}
               </button>
 
               <button
@@ -1088,8 +1080,7 @@ export default function App() {
               <div className="flex items-center gap-2">
                 <button
                   onClick={handleDownloadPDF}
-                  disabled={isGeneratingPDF}
-                  className="px-3.5 py-1.5 text-xs font-bold bg-pink-600 hover:bg-pink-700 text-white rounded-lg transition-colors flex items-center gap-1.5 shadow-2xs disabled:opacity-50"
+                  className="px-3.5 py-1.5 text-xs font-bold bg-pink-600 hover:bg-pink-700 active:bg-pink-800 text-white rounded-lg transition-colors flex items-center gap-1.5 shadow-2xs"
                 >
                   <FileDown className="w-3.5 h-3.5" />
                   {isGeneratingPDF ? 'Generating PDF...' : 'Download PDF'}
@@ -1377,11 +1368,10 @@ export default function App() {
 
         <button
           onClick={handleDownloadPDF}
-          disabled={isGeneratingPDF}
-          className="flex-1 py-2.5 px-3 text-xs font-bold text-white bg-pink-700 active:bg-pink-800 rounded-xl shadow-xs flex items-center justify-center gap-1.5 whitespace-nowrap disabled:opacity-50"
+          className="flex-1 py-2.5 px-3 text-xs font-bold text-white bg-pink-700 active:bg-pink-800 rounded-xl shadow-xs flex items-center justify-center gap-1.5 whitespace-nowrap"
         >
           <FileDown className="w-4 h-4" />
-          <span>{isGeneratingPDF ? 'PDF...' : 'Download PDF'}</span>
+          <span>{isGeneratingPDF ? 'Generating PDF...' : 'Download PDF'}</span>
         </button>
 
         <button
@@ -1428,10 +1418,10 @@ export default function App() {
                   </div>
                   <div>
                     <h4 className="text-xs font-bold text-emerald-950">
-                      Send via WhatsApp (PDF)
+                      Send via WhatsApp
                     </h4>
                     <p className="text-[10px] text-emerald-700">
-                      Downloads PDF & opens WhatsApp for {customerPhone || 'customer'}
+                      Opens WhatsApp directly for {customerPhone || 'customer'}
                     </p>
                   </div>
                 </div>
