@@ -23,7 +23,8 @@ import {
   Share2,
   FileDown,
   Clock,
-  Sparkles
+  Sparkles,
+  Heart
 } from 'lucide-react';
 // @ts-ignore
 import html2pdf from 'html2pdf.js';
@@ -56,11 +57,30 @@ function DoodleCornerFloral(props: { className?: string }) {
   );
 }
 
+function DoodleCrown(props: { className?: string }) {
+  return (
+    <svg className={props.className} viewBox="0 0 32 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M2 17 L 6 6 L 12 12 L 16 3 L 20 12 L 26 6 L 30 17 Z" />
+      <circle cx="16" cy="3" r="1" fill="currentColor" />
+      <circle cx="6" cy="6" r="1" fill="currentColor" />
+      <circle cx="26" cy="6" r="1" fill="currentColor" />
+    </svg>
+  );
+}
+
 function DoodleFlourish(props: { className?: string }) {
   return (
     <svg className={props.className} viewBox="0 0 80 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
       <path d="M2 10 Q 20 2, 40 10 T 78 10" />
       <circle cx="40" cy="10" r="2" fill="currentColor" />
+    </svg>
+  );
+}
+
+function DoodleMiniHeart(props: { className?: string }) {
+  return (
+    <svg className={props.className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z" />
     </svg>
   );
 }
@@ -306,31 +326,9 @@ export default function App() {
     window.print();
   };
 
-  // PDF Generation Helper
-  const generatePDFBlob = async (): Promise<Blob | null> => {
-    const element = document.getElementById('receipt-paper');
-    if (!element) return null;
-
-    const opt = {
-      margin: 8,
-      filename: `Josella_Dolls_Receipt_${orderNumber}.pdf`,
-      image: { type: 'jpeg' as const, quality: 0.98 },
-      html2canvas: { scale: 2, useCORS: true, logging: false },
-      jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' as const }
-    };
-
-    try {
-      const worker = html2pdf().set(opt).from(element);
-      const pdfBlob = await worker.output('blob');
-      return pdfBlob;
-    } catch (err) {
-      console.error('PDF Generation Error:', err);
-      return null;
-    }
-  };
-
   // Direct Download PDF File
   const handleDownloadPDF = async () => {
+    handleSaveToHistory();
     setIsGeneratingPDF(true);
     showToast('Generating official PDF receipt document...');
     const element = document.getElementById('receipt-paper');
@@ -351,8 +349,8 @@ export default function App() {
       await html2pdf().set(opt).from(element).save();
       showToast(`PDF Receipt ${orderNumber}.pdf downloaded!`);
     } catch (err) {
-      console.error(err);
-      showToast('Fallback: Opening print dialog for PDF save...');
+      console.error('PDF Generation Fallback:', err);
+      showToast('Opening print system to save as PDF...');
       window.print();
     } finally {
       setIsGeneratingPDF(false);
@@ -443,7 +441,7 @@ export default function App() {
   );
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-800 flex flex-col font-sans-clean antialiased selection:bg-pink-200 selection:text-pink-900 pb-20 md:pb-0">
+    <div className="min-h-screen bg-slate-50 text-slate-800 flex flex-col font-sans-clean antialiased selection:bg-pink-200 selection:text-pink-900 pb-20 lg:pb-0">
       {/* Toast Notification */}
       {toastMessage && (
         <div className="fixed top-4 right-4 z-50 bg-slate-900 text-white px-4 py-3 rounded-xl shadow-xl flex items-center gap-3 text-xs sm:text-sm font-medium border border-slate-700 toast-container no-print">
@@ -452,138 +450,156 @@ export default function App() {
         </div>
       )}
 
-      {/* --- TOP BAR (FULL MOBILE UNTRUNCATED BRAND NAME & TABLET READY) --- */}
+      {/* --- TOP BAR (RESPONSIVE HEADER WITH ZERO CHOKING ON TABLET/MOBILE) --- */}
       <header className="no-print bg-white border-b border-slate-200 sticky top-0 z-30 shadow-xs">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-          {/* Zone 1: Brand Lockup with Minimal Doodle Accent */}
-          <div className="flex items-start sm:items-center gap-2.5 w-full sm:w-auto">
-            <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-full bg-gradient-to-br from-pink-300 to-pink-500 flex items-center justify-center text-white font-serif-luxury font-bold text-lg sm:text-xl shadow-sm shrink-0 relative">
-              J
-              <DoodleSparkle className="w-3 h-3 text-pink-200 absolute -top-1 -right-1 opacity-80" />
-            </div>
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-1.5 flex-wrap">
-                <span className="text-lg sm:text-xl font-bold tracking-tight text-slate-900 font-serif-luxury leading-tight whitespace-normal">
-                  Josella Dolls
-                </span>
-                <span className="hidden sm:inline-block text-xs font-serif-luxury italic text-pink-500 font-medium">
-                  Boutique
-                </span>
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3.5">
+          {/* Main Top Bar Flex Container */}
+          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+            {/* Zone 1: Brand Lockup Header Row */}
+            <div className="flex items-center justify-between gap-3 w-full lg:w-auto">
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-full bg-gradient-to-br from-pink-300 to-pink-500 flex items-center justify-center text-white font-serif-luxury font-bold text-lg sm:text-xl shadow-sm shrink-0 relative">
+                  J
+                  <DoodleSparkle className="w-3.5 h-3.5 text-pink-200 absolute -top-1 -right-1 opacity-80" />
+                </div>
+                <div className="min-w-0">
+                  <span className="text-base sm:text-xl font-bold tracking-tight text-slate-900 font-serif-luxury block leading-tight">
+                    Josella Dolls
+                  </span>
+                  <p className="hidden lg:block text-[10px] uppercase tracking-wider text-pink-700 font-semibold leading-tight mt-0.5">
+                    Luxury Beauty, Esthetic & Spa Product and Equipment suppliers · Cotonou
+                  </p>
+                </div>
               </div>
-              <p className="text-[10px] uppercase tracking-wider text-pink-700 font-semibold leading-tight mt-0.5 whitespace-normal">
-                Luxury Beauty, Esthetic & Spa Product and Equipment suppliers · Cotonou
+
+              {/* Mobile/Tablet Header Quick Actions */}
+              <div className="flex items-center gap-2 lg:hidden shrink-0">
+                <button
+                  onClick={() => setHistoryOpen(true)}
+                  className="px-3 py-1.5 text-xs font-semibold text-slate-800 bg-slate-100 border border-slate-200 rounded-lg flex items-center gap-1.5"
+                  title="View Saved Receipt History"
+                >
+                  <History className="w-3.5 h-3.5 text-pink-600" />
+                  <span>History</span>
+                  {savedReceipts.length > 0 && (
+                    <span className="bg-pink-600 text-white text-[10px] font-bold px-1.5 py-0.2 rounded-full">
+                      {savedReceipts.length}
+                    </span>
+                  )}
+                </button>
+              </div>
+            </div>
+
+            {/* Mobile/Tablet Subtitle Block (clean 2-line layout without top line divider) */}
+            <div className="lg:hidden text-left pt-1 space-y-0.5">
+              <p className="text-[10px] sm:text-[11px] font-bold uppercase tracking-wider text-pink-700 leading-tight block">
+                Luxury Beauty, Esthetic & Spa Product and Equipment suppliers
+              </p>
+              <p className="text-[9px] sm:text-[10px] font-semibold text-pink-600 uppercase tracking-wider block">
+                Cotonou, Benin Republic
               </p>
             </div>
-          </div>
 
-          {/* Zone 2: Navigation Links (Tablet & Desktop >= 768px) */}
-          <nav className="hidden md:flex items-center gap-3 text-xs font-semibold text-slate-600">
-            <button
-              onClick={handleNewBlankReceipt}
-              className="hover:text-pink-900 hover:bg-pink-50 px-3 py-1.5 rounded-lg transition-colors whitespace-nowrap shrink-0 flex items-center gap-1.5 text-slate-700"
-            >
-              <Plus className="w-3.5 h-3.5 text-pink-600" />
-              Blank Receipt
-            </button>
-            <button
-              onClick={() => setHistoryOpen(true)}
-              className="hover:text-slate-900 hover:bg-slate-100 px-3 py-1.5 rounded-lg transition-colors whitespace-nowrap shrink-0 flex items-center gap-1.5 text-slate-700"
-            >
-              <History className="w-3.5 h-3.5 text-slate-500" />
-              History
-              {savedReceipts.length > 0 && (
-                <span className="bg-pink-500 text-white text-[10px] font-bold px-1.5 py-0.2 rounded-full">
-                  {savedReceipts.length}
-                </span>
-              )}
-            </button>
-          </nav>
+            {/* Desktop Navigation & Actions (lg >= 1024px) */}
+            <div className="hidden lg:flex items-center gap-3 shrink-0">
+              <button
+                onClick={handleNewBlankReceipt}
+                className="hover:text-pink-900 hover:bg-pink-50 px-3 py-1.5 text-xs font-semibold text-slate-700 rounded-lg transition-colors flex items-center gap-1.5"
+              >
+                <Plus className="w-3.5 h-3.5 text-pink-600" />
+                Blank Receipt
+              </button>
 
-          {/* Zone 3: Actions (Tablet & Desktop >= 640px) */}
-          <div className="hidden sm:flex items-center gap-2 shrink-0 self-end sm:self-auto">
-            <button
-              onClick={handleSaveToHistory}
-              className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-slate-700 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 transition-colors shadow-2xs whitespace-nowrap"
-              title="Save current receipt"
-            >
-              <Save className="w-3.5 h-3.5 text-slate-600" />
-              Save
-            </button>
+              <button
+                onClick={() => setHistoryOpen(true)}
+                className="px-3 py-1.5 text-xs font-semibold text-slate-800 bg-slate-100 hover:bg-slate-200 border border-slate-200 rounded-lg transition-colors flex items-center gap-1.5"
+              >
+                <History className="w-3.5 h-3.5 text-pink-600" />
+                <span>History</span>
+                {savedReceipts.length > 0 && (
+                  <span className="bg-pink-600 text-white text-[10px] font-bold px-1.5 py-0.2 rounded-full">
+                    {savedReceipts.length}
+                  </span>
+                )}
+              </button>
 
-            <button
-              onClick={handleDownloadPDF}
-              disabled={isGeneratingPDF}
-              className="flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-bold text-white bg-pink-700 hover:bg-pink-800 rounded-lg shadow-sm transition-all whitespace-nowrap disabled:opacity-50"
-            >
-              <FileDown className="w-4 h-4" />
-              {isGeneratingPDF ? 'PDF...' : 'Download PDF'}
-            </button>
+              <button
+                onClick={handleDownloadPDF}
+                disabled={isGeneratingPDF}
+                className="flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-bold text-white bg-pink-700 hover:bg-pink-800 rounded-lg shadow-sm transition-all whitespace-nowrap disabled:opacity-50"
+              >
+                <FileDown className="w-4 h-4" />
+                {isGeneratingPDF ? 'PDF...' : 'Download PDF'}
+              </button>
 
-            <button
-              onClick={() => setShareModalOpen(true)}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-slate-900 bg-slate-100 hover:bg-slate-200 border border-slate-300 rounded-lg transition-colors whitespace-nowrap"
-            >
-              <Share2 className="w-3.5 h-3.5 text-slate-700" />
-              Send / Share
-            </button>
+              <button
+                onClick={() => setShareModalOpen(true)}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-slate-900 bg-slate-100 hover:bg-slate-200 border border-slate-300 rounded-lg transition-colors whitespace-nowrap"
+              >
+                <Share2 className="w-3.5 h-3.5 text-slate-700" />
+                Send / Share
+              </button>
+            </div>
           </div>
         </div>
 
-        {/* Mobile Viewport Navigation Switcher (strictly < 768px) */}
-        <div className="md:hidden flex border-t border-slate-200 p-1 bg-slate-100">
+        {/* Panel Switcher Tabs (For Mobile & Tablet screens < 1024px to keep views spacious and un-squeezed) */}
+        <div className="lg:hidden flex border-t border-slate-200 p-1.5 bg-slate-100">
           <button
             onClick={() => setActiveTab('editor')}
-            className={`flex-1 py-1.5 text-xs font-medium rounded-md text-center transition-all ${
+            className={`flex-1 py-2 text-xs font-medium rounded-lg text-center transition-all flex items-center justify-center gap-1.5 ${
               activeTab === 'editor' ? 'bg-white text-slate-900 shadow-xs font-bold' : 'text-slate-600'
             }`}
           >
-            1. Form Editor
+            <Edit3 className="w-3.5 h-3.5 text-pink-600" />
+            <span>1. Receipt Form Editor</span>
           </button>
           <button
             onClick={() => setActiveTab('preview')}
-            className={`flex-1 py-1.5 text-xs font-medium rounded-md text-center transition-all ${
+            className={`flex-1 py-2 text-xs font-medium rounded-lg text-center transition-all flex items-center justify-center gap-1.5 ${
               activeTab === 'preview' ? 'bg-white text-slate-900 shadow-xs font-bold' : 'text-slate-600'
             }`}
           >
-            2. Live Receipt Preview
+            <FileText className="w-3.5 h-3.5 text-pink-600" />
+            <span>2. Live Receipt Preview</span>
           </button>
         </div>
       </header>
 
-      {/* --- MAIN CONTENT LAYOUT (TABLET & DESKTOP 2-COLUMN SPLIT AT MD >= 768px) --- */}
-      <main className="flex-1 max-w-7xl w-full mx-auto p-3 sm:p-6 lg:p-8">
-        <div className="grid grid-cols-1 md:grid-cols-12 gap-6 lg:gap-8 items-start">
+      {/* --- MAIN CONTENT LAYOUT (SPACIOUS 2-COLUMN DESKTOP SPLIT AT LG >= 1024px) --- */}
+      <main className="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 lg:p-8">
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
           
           {/* ========================================================================= */}
-          {/* LEFT PANEL: INTERACTIVE FORM CONTROLS (Cols 1-6 on Tablet & Desktop)     */}
+          {/* LEFT PANEL: INTERACTIVE FORM CONTROLS                                    */}
           {/* ========================================================================= */}
           <div
-            className={`md:col-span-6 space-y-5 sidebar-controls no-print ${
-              activeTab === 'editor' ? 'block' : 'hidden md:block'
+            className={`lg:col-span-6 space-y-6 sidebar-controls no-print ${
+              activeTab === 'editor' ? 'block' : 'hidden lg:block'
             }`}
           >
             {/* Header Controls Toolbar */}
-            <div className="flex items-center justify-between bg-white p-3.5 rounded-2xl border border-slate-200/80 shadow-2xs">
+            <div className="flex items-center justify-between bg-white p-4 rounded-2xl border border-slate-200/80 shadow-2xs">
               <div className="flex items-center gap-2">
                 <FileText className="w-4 h-4 text-pink-600" />
-                <h2 className="text-xs sm:text-sm font-bold text-slate-900 tracking-wide uppercase flex items-center gap-1">
-                  <span>Receipt Details</span>
-                  <DoodleSparkle className="w-3 h-3 text-pink-400 inline ml-0.5 opacity-70" />
+                <h2 className="text-xs sm:text-sm font-bold text-slate-900 tracking-wide uppercase flex items-center gap-1.5">
+                  <span>Receipt Form Editor</span>
+                  <DoodleSparkle className="w-3.5 h-3.5 text-pink-400 opacity-80" />
                 </h2>
               </div>
               <button
                 type="button"
                 onClick={handleNewBlankReceipt}
-                className="text-[11px] text-pink-700 hover:text-pink-900 font-semibold flex items-center gap-1 bg-pink-50 hover:bg-pink-100 px-2.5 py-1 rounded-lg transition-colors"
+                className="text-xs text-pink-700 hover:text-pink-900 font-semibold flex items-center gap-1 bg-pink-50 hover:bg-pink-100 px-3 py-1.5 rounded-lg transition-colors"
               >
-                <Plus className="w-3 h-3" />
-                New Blank
+                <Plus className="w-3.5 h-3.5" />
+                New Blank Receipt
               </button>
             </div>
 
             {/* Order Header Settings */}
-            <div className="bg-white rounded-2xl p-4 sm:p-6 border border-slate-200/80 shadow-2xs space-y-4">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+            <div className="bg-white rounded-2xl p-5 sm:p-6 border border-slate-200/80 shadow-2xs space-y-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 {/* Receipt Number */}
                 <div>
                   <div className="flex items-center justify-between mb-1">
@@ -691,8 +707,8 @@ export default function App() {
             </div>
 
             {/* Customer Information Block */}
-            <div className="bg-white rounded-2xl p-4 sm:p-6 border border-slate-200/80 shadow-2xs space-y-3.5">
-              <div className="flex items-center gap-2 border-b border-slate-100 pb-2.5">
+            <div className="bg-white rounded-2xl p-5 sm:p-6 border border-slate-200/80 shadow-2xs space-y-4">
+              <div className="flex items-center gap-2 border-b border-slate-100 pb-3">
                 <User className="w-4 h-4 text-pink-600" />
                 <h2 className="text-xs sm:text-sm font-bold text-slate-900 tracking-wide uppercase">
                   Customer Information
@@ -745,8 +761,8 @@ export default function App() {
             </div>
 
             {/* Purchased Items Table */}
-            <div className="bg-white rounded-2xl p-4 sm:p-6 border border-slate-200/80 shadow-2xs space-y-4">
-              <div className="flex items-center justify-between border-b border-slate-100 pb-2.5">
+            <div className="bg-white rounded-2xl p-5 sm:p-6 border border-slate-200/80 shadow-2xs space-y-4">
+              <div className="flex items-center justify-between border-b border-slate-100 pb-3">
                 <div className="flex items-center gap-2">
                   <ShoppingBag className="w-4 h-4 text-pink-600" />
                   <h2 className="text-xs sm:text-sm font-bold text-slate-900 tracking-wide uppercase">
@@ -763,7 +779,7 @@ export default function App() {
                 {items.map((item, index) => (
                   <div
                     key={item.id}
-                    className="p-3 rounded-xl bg-slate-50 border border-slate-200 space-y-2 relative group hover:border-pink-200 transition-colors"
+                    className="p-3.5 rounded-xl bg-slate-50 border border-slate-200 space-y-2.5 relative group hover:border-pink-200 transition-colors"
                   >
                     <div className="flex items-center justify-between gap-2">
                       <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
@@ -779,7 +795,7 @@ export default function App() {
                       </button>
                     </div>
 
-                    <div className="grid grid-cols-12 gap-2">
+                    <div className="grid grid-cols-12 gap-2.5">
                       {/* Description */}
                       <div className="col-span-12 sm:col-span-6">
                         <input
@@ -787,7 +803,7 @@ export default function App() {
                           value={item.description}
                           onChange={(e) => handleItemChange(item.id, 'description', e.target.value)}
                           placeholder="Product name / equipment description..."
-                          className="w-full px-2.5 py-1.5 text-xs rounded-lg border border-slate-300 bg-white focus:outline-none focus:ring-2 focus:ring-pink-400 text-slate-800"
+                          className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 bg-white focus:outline-none focus:ring-2 focus:ring-pink-400 text-slate-800"
                         />
                       </div>
 
@@ -801,7 +817,7 @@ export default function App() {
                             onChange={(e) =>
                               handleItemChange(item.id, 'quantity', Math.max(1, parseInt(e.target.value) || 1))
                             }
-                            className="w-full px-2 py-1.5 text-xs rounded-lg border border-slate-300 bg-white focus:outline-none focus:ring-2 focus:ring-pink-400 text-slate-800 text-center font-semibold"
+                            className="w-full px-2 py-2 text-xs rounded-lg border border-slate-300 bg-white focus:outline-none focus:ring-2 focus:ring-pink-400 text-slate-800 text-center font-semibold"
                           />
                           <span className="text-[9px] text-slate-400 block text-center mt-0.5">Qty</span>
                         </div>
@@ -821,7 +837,7 @@ export default function App() {
                                 Math.max(0, parseFloat(e.target.value) || 0)
                               )
                             }
-                            className="w-full px-2 py-1.5 text-xs rounded-lg border border-slate-300 bg-white focus:outline-none focus:ring-2 focus:ring-pink-400 text-slate-800 text-right font-mono"
+                            className="w-full px-2.5 py-2 text-xs rounded-lg border border-slate-300 bg-white focus:outline-none focus:ring-2 focus:ring-pink-400 text-slate-800 text-right font-mono"
                             placeholder="0"
                           />
                           <span className="text-[9px] text-slate-400 block text-right mt-0.5">
@@ -832,9 +848,9 @@ export default function App() {
                     </div>
 
                     {/* Calculated row summary */}
-                    <div className="flex justify-end pt-1 border-t border-slate-200/50">
+                    <div className="flex justify-end pt-1.5 border-t border-slate-200/60">
                       <span className="text-xs font-semibold text-slate-600">
-                        Total: <span className="font-mono text-slate-900">{formatCurrency(item.quantity * item.unitPrice, currency)}</span>
+                        Row Total: <span className="font-mono text-slate-900 font-bold">{formatCurrency(item.quantity * item.unitPrice, currency)}</span>
                       </span>
                     </div>
                   </div>
@@ -845,7 +861,7 @@ export default function App() {
               <button
                 type="button"
                 onClick={handleAddItem}
-                className="w-full py-2 border-2 border-dashed border-pink-200 hover:border-pink-400 bg-pink-50/50 hover:bg-pink-50 rounded-xl text-pink-700 text-xs font-bold flex items-center justify-center gap-2 transition-all"
+                className="w-full py-2.5 border-2 border-dashed border-pink-200 hover:border-pink-400 bg-pink-50/50 hover:bg-pink-50 rounded-xl text-pink-700 text-xs font-bold flex items-center justify-center gap-2 transition-all"
               >
                 <Plus className="w-4 h-4" />
                 Add Item Row
@@ -853,33 +869,33 @@ export default function App() {
             </div>
 
             {/* Financial Calculations & Adjustments */}
-            <div className="bg-white rounded-2xl p-4 sm:p-6 border border-slate-200/80 shadow-2xs space-y-4">
-              <div className="flex items-center gap-2 border-b border-slate-100 pb-2.5">
+            <div className="bg-white rounded-2xl p-5 sm:p-6 border border-slate-200/80 shadow-2xs space-y-4">
+              <div className="flex items-center gap-2 border-b border-slate-100 pb-3">
                 <Tag className="w-4 h-4 text-pink-600" />
                 <h2 className="text-xs sm:text-sm font-bold text-slate-900 tracking-wide uppercase">
                   Shipping, Taxes & Discounts
                 </h2>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
                 {/* Shipping Fee */}
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">
-                    Shipping & Delivery ({currency})
+                <div className="bg-slate-50 p-3 rounded-xl border border-slate-200/80 space-y-1">
+                  <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider truncate">
+                    Shipping ({currency})
                   </label>
                   <input
                     type="number"
                     min="0"
                     value={shippingFee || ''}
                     onChange={(e) => setShippingFee(Math.max(0, parseFloat(e.target.value) || 0))}
-                    className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-pink-400 text-slate-800 font-mono"
+                    className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 bg-white focus:outline-none focus:ring-2 focus:ring-pink-400 text-slate-800 font-mono font-semibold"
                     placeholder="0"
                   />
                 </div>
 
                 {/* Tax Rate % */}
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                <div className="bg-slate-50 p-3 rounded-xl border border-slate-200/80 space-y-1">
+                  <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider truncate">
                     Tax Rate (%)
                   </label>
                   <input
@@ -888,21 +904,21 @@ export default function App() {
                     max="100"
                     value={taxRate || ''}
                     onChange={(e) => setTaxRate(Math.max(0, parseFloat(e.target.value) || 0))}
-                    className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-pink-400 text-slate-800 font-mono"
+                    className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 bg-white focus:outline-none focus:ring-2 focus:ring-pink-400 text-slate-800 font-mono font-semibold"
                     placeholder="0"
                   />
                 </div>
 
                 {/* Discount */}
-                <div>
-                  <div className="flex items-center justify-between mb-1">
-                    <label className="text-xs font-semibold text-slate-700">
+                <div className="bg-slate-50 p-3 rounded-xl border border-slate-200/80 space-y-1">
+                  <div className="flex items-center justify-between">
+                    <label className="text-[11px] font-bold text-slate-700 uppercase tracking-wider truncate">
                       Discount
                     </label>
                     <button
                       type="button"
                       onClick={() => setDiscountType(discountType === 'fixed' ? 'percent' : 'fixed')}
-                      className="text-[10px] text-pink-700 hover:underline font-bold"
+                      className="text-[10px] text-pink-700 hover:underline font-bold shrink-0"
                     >
                       [{discountType === 'fixed' ? currency : '%'}]
                     </button>
@@ -912,7 +928,7 @@ export default function App() {
                     min="0"
                     value={discount || ''}
                     onChange={(e) => setDiscount(Math.max(0, parseFloat(e.target.value) || 0))}
-                    className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-pink-400 text-slate-800 font-mono"
+                    className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 bg-white focus:outline-none focus:ring-2 focus:ring-pink-400 text-slate-800 font-mono font-semibold"
                     placeholder="0"
                   />
                 </div>
@@ -920,8 +936,8 @@ export default function App() {
             </div>
 
             {/* Notes & Terms */}
-            <div className="bg-white rounded-2xl p-4 sm:p-6 border border-slate-200/80 shadow-2xs space-y-4">
-              <div className="flex items-center justify-between border-b border-slate-100 pb-2.5">
+            <div className="bg-white rounded-2xl p-5 sm:p-6 border border-slate-200/80 shadow-2xs space-y-4">
+              <div className="flex items-center justify-between border-b border-slate-100 pb-3">
                 <div className="flex items-center gap-2">
                   <Edit3 className="w-4 h-4 text-pink-600" />
                   <h2 className="text-xs sm:text-sm font-bold text-slate-900 tracking-wide uppercase">
@@ -955,19 +971,20 @@ export default function App() {
           </div>
 
           {/* ========================================================================= */}
-          {/* RIGHT PANEL: LIVE RECEIPT PREVIEW (Cols 7-12 on Tablet & Desktop)        */}
+          {/* RIGHT PANEL: LIVE RECEIPT PREVIEW                                         */}
           {/* ========================================================================= */}
           <div
-            className={`md:col-span-6 space-y-4 ${
-              activeTab === 'preview' ? 'block' : 'hidden md:block'
+            className={`lg:col-span-6 space-y-4 ${
+              activeTab === 'preview' ? 'block' : 'hidden lg:block'
             }`}
           >
             {/* Control banner for desktop & tablet actions */}
             <div className="no-print bg-slate-900 text-white p-3.5 rounded-2xl flex items-center justify-between gap-4 shadow-sm">
               <div className="flex items-center gap-2">
                 <div className="w-2.5 h-2.5 rounded-full bg-pink-400 animate-pulse" />
-                <span className="text-xs font-semibold tracking-wide">
-                  Live Visual Receipt Preview
+                <span className="text-xs font-semibold tracking-wide flex items-center gap-1">
+                  <span>Live Visual Receipt Preview</span>
+                  <DoodleSparkle className="w-3 h-3 text-pink-300 opacity-80" />
                 </span>
               </div>
 
@@ -994,9 +1011,9 @@ export default function App() {
             <div className="relative">
               <div
                 id="receipt-paper"
-                className="bg-white border border-slate-200 rounded-2xl p-4 sm:p-8 lg:p-10 shadow-xl relative overflow-hidden transition-all text-slate-800"
+                className="bg-white border border-slate-200 rounded-2xl p-5 sm:p-8 lg:p-10 shadow-xl relative overflow-hidden transition-all text-slate-800"
               >
-                {/* Minimal Floral Doodle Accent in Top Right Corner (Non-intrusive, clear of text) */}
+                {/* Minimal Floral Doodle Accent in Top Right Corner */}
                 <DoodleCornerFloral className="absolute top-2 right-2 w-12 h-12 text-pink-300/40 pointer-events-none select-none no-print" />
 
                 {/* Background Seal Watermark */}
@@ -1015,6 +1032,7 @@ export default function App() {
                     {/* Brand Header */}
                     <div>
                       <div className="relative inline-block">
+                        <DoodleCrown className="w-6 h-4 text-pink-400/80 mb-0.5 block" />
                         <h1 className="font-serif-luxury text-2xl sm:text-3xl font-bold tracking-tight text-slate-900 leading-tight">
                           Josella Dolls
                         </h1>
@@ -1037,7 +1055,8 @@ export default function App() {
 
                     {/* Receipt Meta & Badge */}
                     <div className="text-left sm:text-right space-y-1 shrink-0">
-                      <div className="inline-block bg-pink-50 border border-pink-200 px-2.5 py-0.5 rounded-full mb-1">
+                      <div className="inline-flex items-center gap-1 bg-pink-50 border border-pink-200 px-2.5 py-0.5 rounded-full mb-1">
+                        <DoodleSparkle className="w-2.5 h-2.5 text-pink-500" />
                         <span className="text-[10px] font-bold uppercase tracking-wider text-pink-900">
                           Official Customer Receipt
                         </span>
@@ -1080,16 +1099,16 @@ export default function App() {
                   </div>
                 </div>
 
-                {/* --- 3. ITEMIZED TABLE --- */}
-                <div className="mb-5 overflow-hidden rounded-xl border border-slate-200">
-                  <table className="w-full text-left border-collapse">
+                {/* --- 3. ITEMIZED TABLE WITH SCROLL & MIN-WIDTH FOR LARGE FCFA PRICES --- */}
+                <div className="mb-5 overflow-x-auto rounded-xl border border-slate-200">
+                  <table className="w-full text-left border-collapse min-w-[500px] sm:min-w-0">
                     <thead>
                       <tr className="bg-pink-100/70 border-b border-pink-200 text-pink-950 text-[10px] sm:text-[11px] font-bold uppercase tracking-wider">
-                        <th className="py-2 px-3">#</th>
-                        <th className="py-2 px-3">Item Description</th>
-                        <th className="py-2 px-3 text-center">Qty</th>
-                        <th className="py-2 px-3 text-right">Unit Price</th>
-                        <th className="py-2 px-3 text-right">Total ({currency})</th>
+                        <th className="py-2.5 px-3">#</th>
+                        <th className="py-2.5 px-3">Item Description</th>
+                        <th className="py-2.5 px-3 text-center">Qty</th>
+                        <th className="py-2.5 px-3 text-right whitespace-nowrap">Unit Price</th>
+                        <th className="py-2.5 px-3 text-right whitespace-nowrap min-w-[120px]">Total ({currency})</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 text-xs text-slate-700">
@@ -1100,16 +1119,16 @@ export default function App() {
                             <td className="py-2.5 px-3 font-semibold text-slate-400 text-center w-7 text-[11px]">
                               {index + 1}
                             </td>
-                            <td className="py-2.5 px-3 font-semibold text-slate-900 max-w-[180px] sm:max-w-none break-words text-xs">
+                            <td className="py-2.5 px-3 font-semibold text-slate-900 max-w-[220px] sm:max-w-none break-words text-xs">
                               {item.description || 'Beauty / Esthetic Supply Item'}
                             </td>
                             <td className="py-2.5 px-3 text-center font-bold text-slate-800 text-xs">
                               {item.quantity}
                             </td>
-                            <td className="py-2.5 px-3 text-right font-mono text-slate-600 text-xs">
+                            <td className="py-2.5 px-3 text-right font-mono text-slate-600 text-xs whitespace-nowrap">
                               {formatCurrency(item.unitPrice, currency)}
                             </td>
-                            <td className="py-2.5 px-3 text-right font-mono font-bold text-slate-900 text-xs">
+                            <td className="py-2.5 px-3 text-right font-mono font-bold text-slate-900 text-xs whitespace-nowrap min-w-[120px]">
                               {formatCurrency(lineTotal, currency)}
                             </td>
                           </tr>
@@ -1176,45 +1195,48 @@ export default function App() {
                   </div>
 
                   {/* Totals Summary */}
-                  <div className="sm:col-span-6 space-y-1.5 text-xs">
-                    <div className="flex justify-between py-1 border-b border-slate-100 text-slate-600">
+                  <div className="sm:col-span-6 space-y-2 text-xs">
+                    <div className="flex justify-between items-center py-1 border-b border-slate-100 text-slate-600">
                       <span>Subtotal:</span>
-                      <span className="font-mono font-semibold text-slate-900">
+                      <span className="font-mono font-semibold text-slate-900 whitespace-nowrap">
                         {formatCurrency(subtotal, currency)}
                       </span>
                     </div>
 
                     {shippingFee > 0 && (
-                      <div className="flex justify-between py-1 border-b border-slate-100 text-slate-600">
+                      <div className="flex justify-between items-center py-1 border-b border-slate-100 text-slate-600">
                         <span>Shipping & Handling:</span>
-                        <span className="font-mono font-semibold text-slate-900">
+                        <span className="font-mono font-semibold text-slate-900 whitespace-nowrap">
                           {formatCurrency(shippingFee, currency)}
                         </span>
                       </div>
                     )}
 
                     {discountAmount > 0 && (
-                      <div className="flex justify-between py-1 border-b border-slate-100 text-emerald-700 font-medium">
+                      <div className="flex justify-between items-center py-1 border-b border-slate-100 text-emerald-700 font-medium">
                         <span>Discount ({discountType === 'percent' ? `${discount}%` : 'Fixed'}):</span>
-                        <span className="font-mono font-bold">
+                        <span className="font-mono font-bold whitespace-nowrap">
                           -{formatCurrency(discountAmount, currency)}
                         </span>
                       </div>
                     )}
 
                     {taxAmount > 0 && (
-                      <div className="flex justify-between py-1 border-b border-slate-100 text-slate-600">
+                      <div className="flex justify-between items-center py-1 border-b border-slate-100 text-slate-600">
                         <span>Tax ({taxRate}%):</span>
-                        <span className="font-mono font-semibold text-slate-900">
+                        <span className="font-mono font-semibold text-slate-900 whitespace-nowrap">
                           {formatCurrency(taxAmount, currency)}
                         </span>
                       </div>
                     )}
 
-                    {/* Highlighted Grand Total Box */}
-                    <div className="bg-pink-100/80 border border-pink-200 rounded-xl p-2.5 flex justify-between items-center text-pink-950 font-bold mt-1.5 relative overflow-hidden">
-                      <span className="text-xs uppercase tracking-wider">Grand Total:</span>
-                      <span className="font-mono text-base sm:text-lg text-pink-900 z-10">
+                    {/* Highlighted Grand Total Box (Extra Breathing Room for Millions of FCFA) */}
+                    <div className="bg-pink-100/90 border border-pink-200/90 rounded-2xl p-3 sm:p-4 flex flex-col sm:flex-row justify-between sm:items-center gap-2 font-bold text-pink-950 shadow-2xs">
+                      <span className="text-xs uppercase tracking-wider flex items-center gap-1.5 shrink-0">
+                        <span>Grand Total:</span>
+                        <DoodleSparkle className="w-3.5 h-3.5 text-pink-600 opacity-80" />
+                      </span>
+                      <span className="font-mono text-base sm:text-xl font-bold text-pink-900 whitespace-nowrap tracking-tight">
                         {formatCurrency(grandTotal, currency)}
                       </span>
                     </div>
@@ -1235,9 +1257,9 @@ export default function App() {
                       Luxury Beauty, Esthetic & Spa Product and Equipment suppliers
                     </p>
                     <p className="text-[9px] text-slate-400 font-semibold tracking-widest uppercase flex items-center justify-center gap-1.5">
-                      <DoodleSparkle className="w-2.5 h-2.5 text-pink-400" />
+                      <DoodleMiniHeart className="w-2.5 h-2.5 text-pink-400 fill-pink-100" />
                       <span>Thank You For Your Business</span>
-                      <DoodleSparkle className="w-2.5 h-2.5 text-pink-400" />
+                      <DoodleMiniHeart className="w-2.5 h-2.5 text-pink-400 fill-pink-100" />
                     </p>
                   </div>
                 </div>
@@ -1247,23 +1269,37 @@ export default function App() {
         </div>
       </main>
 
-      {/* --- MOBILE STICKY BOTTOM ACTION BAR (strictly < 768px NO-PRINT) --- */}
-      <div className="no-print fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-md border-t border-slate-200 p-2.5 shadow-lg md:hidden flex items-center justify-between gap-2">
+      {/* --- MOBILE & TABLET STICKY BOTTOM ACTION BAR (strictly < 1024px NO-PRINT) --- */}
+      <div className="no-print fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-md border-t border-slate-200 p-2.5 shadow-lg lg:hidden flex items-center justify-between gap-2">
+        <button
+          onClick={() => setHistoryOpen(true)}
+          className="py-2.5 px-3 text-xs font-bold text-slate-800 bg-slate-100 active:bg-slate-200 border border-slate-300 rounded-xl flex items-center justify-center gap-1.5 whitespace-nowrap shrink-0 relative"
+          title="View Saved Receipt History"
+        >
+          <History className="w-4 h-4 text-pink-600" />
+          <span>History</span>
+          {savedReceipts.length > 0 && (
+            <span className="bg-pink-600 text-white text-[10px] font-bold px-1.5 py-0.2 rounded-full">
+              {savedReceipts.length}
+            </span>
+          )}
+        </button>
+
         <button
           onClick={handleDownloadPDF}
           disabled={isGeneratingPDF}
           className="flex-1 py-2.5 px-3 text-xs font-bold text-white bg-pink-700 active:bg-pink-800 rounded-xl shadow-xs flex items-center justify-center gap-1.5 whitespace-nowrap disabled:opacity-50"
         >
           <FileDown className="w-4 h-4" />
-          <span>{isGeneratingPDF ? 'Generating...' : 'Download PDF'}</span>
+          <span>{isGeneratingPDF ? 'PDF...' : 'Download PDF'}</span>
         </button>
 
         <button
           onClick={() => setShareModalOpen(true)}
-          className="flex-1 py-2.5 px-3 text-xs font-bold text-slate-900 bg-slate-100 active:bg-slate-200 border border-slate-300 rounded-xl flex items-center justify-center gap-1.5 whitespace-nowrap"
+          className="py-2.5 px-3 text-xs font-bold text-slate-900 bg-slate-100 active:bg-slate-200 border border-slate-300 rounded-xl flex items-center justify-center gap-1.5 whitespace-nowrap shrink-0"
         >
           <Share2 className="w-4 h-4 text-slate-700" />
-          <span>Send / Share</span>
+          <span>Share</span>
         </button>
       </div>
 
@@ -1400,7 +1436,7 @@ export default function App() {
                 <div className="text-center py-12 text-slate-400 space-y-2">
                   <FileText className="w-10 h-10 mx-auto opacity-30 text-pink-500" />
                   <p className="text-xs font-medium">No saved receipts found in history.</p>
-                  <p className="text-[11px]">Click "Save" in the top bar to store receipts locally.</p>
+                  <p className="text-[11px]">Downloaded and shared receipts are automatically stored in history.</p>
                 </div>
               ) : (
                 filteredHistory.map((receipt) => (
