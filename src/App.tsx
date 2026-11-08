@@ -490,13 +490,10 @@ export default function App() {
               </div>
             </div>
 
-            {/* Mobile/Tablet Subtitle Block (clean 2-line layout without top line divider) */}
-            <div className="lg:hidden text-left pt-1 space-y-0.5">
-              <p className="text-[10px] sm:text-[11px] font-bold uppercase tracking-wider text-pink-700 leading-tight block">
-                Luxury Beauty, Esthetic & Spa Product and Equipment suppliers
-              </p>
-              <p className="text-[9px] sm:text-[10px] font-semibold text-pink-600 uppercase tracking-wider block">
-                Cotonou, Benin Republic
+            {/* Mobile/Tablet Subtitle Block (Unified brand pink text-pink-700) */}
+            <div className="lg:hidden text-left pt-0.5">
+              <p className="text-[10px] sm:text-[11px] font-semibold uppercase tracking-wider text-pink-700 leading-tight">
+                Luxury Beauty, Esthetic & Spa Product and Equipment suppliers · Cotonou
               </p>
             </div>
 
