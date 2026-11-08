@@ -328,11 +328,12 @@ export default function App() {
     setIsGeneratingPDF(true);
     showToast('Generating official PDF receipt document...');
 
-    // If on mobile and currently viewing editor, temporarily show preview for capture
+    // If on mobile and currently viewing editor, switch to preview tab for capture
     const wasEditorTab = activeTab === 'editor';
     if (wasEditorTab) {
       setActiveTab('preview');
-      await new Promise((r) => setTimeout(r, 150)); // Allow DOM layout repaint
+      // Give mobile browsers 350ms to render the live receipt preview container completely
+      await new Promise((r) => setTimeout(r, 350));
     }
 
     const sourceElement = document.getElementById('receipt-paper');
@@ -370,42 +371,45 @@ export default function App() {
         }
       }
 
-      // Generate PDF Blob using html2pdf worker
-      const worker = html2pdf().set(opt).from(sourceElement).toPdf();
-      const pdf = await worker.get('pdf');
-      const pdfBlob: Blob = pdf.output('blob');
-
-      if (!pdfBlob || pdfBlob.size === 0) {
-        throw new Error('Generated PDF Blob was empty');
-      }
-
-      // Trigger direct link file download
-      const blobUrl = URL.createObjectURL(pdfBlob);
-      const downloadAnchor = document.createElement('a');
-      downloadAnchor.href = blobUrl;
-      downloadAnchor.download = fileName;
-      downloadAnchor.style.display = 'none';
-      document.body.appendChild(downloadAnchor);
-      downloadAnchor.click();
-      document.body.removeChild(downloadAnchor);
-      setTimeout(() => URL.revokeObjectURL(blobUrl), 3000);
+      // Use html2pdf direct .save() engine which calls jsPDF internal file saver (optimized for desktop & mobile)
+      await html2pdf().set(opt).from(sourceElement).save();
 
       showToast(`PDF Receipt ${fileName} downloaded!`);
-      return pdfBlob;
+      return null;
     } catch (err) {
       console.error('PDF Generation Error:', err);
-      showToast('Opening print dialog to save as PDF...');
-      window.print();
+      // Secondary fallback using blob URL anchor if .save() throws on edge browsers
+      try {
+        const worker = html2pdf().set(opt).from(sourceElement).toPdf();
+        const pdf = await worker.get('pdf');
+        const pdfBlob: Blob = pdf.output('blob');
+        if (pdfBlob && pdfBlob.size > 0) {
+          const blobUrl = URL.createObjectURL(pdfBlob);
+          const downloadAnchor = document.createElement('a');
+          downloadAnchor.href = blobUrl;
+          downloadAnchor.download = fileName;
+          downloadAnchor.style.display = 'none';
+          document.body.appendChild(downloadAnchor);
+          downloadAnchor.click();
+          document.body.removeChild(downloadAnchor);
+          setTimeout(() => URL.revokeObjectURL(blobUrl), 4000);
+          showToast(`PDF Receipt ${fileName} downloaded!`);
+        }
+      } catch (fallbackErr) {
+        console.error('Fallback PDF error:', fallbackErr);
+        showToast('Opening print dialog to save as PDF...');
+        window.print();
+      }
       return null;
     } finally {
       if (wasEditorTab) {
-        setTimeout(() => setActiveTab('editor'), 600);
+        setTimeout(() => setActiveTab('editor'), 800);
       }
       setIsGeneratingPDF(false);
     }
   };
 
-  // Send via WhatsApp (OPENS WHATSAPP DIRECTLY TO CONTACT SELECTION SCREEN ON MOBILE & LAPTOP)
+  // Send via WhatsApp (OPENS WHATSAPP DIRECTLY TO CONTACT SELECTION & DOWNLOADS PDF FOR ATTACHMENT)
   const handleSendWhatsAppPDF = () => {
     handleSaveToHistory();
     setShareModalOpen(false);
@@ -439,13 +443,18 @@ export default function App() {
     if (phoneNum.length >= 8) {
       whatsappUrl = `https://api.whatsapp.com/send?phone=${phoneNum}&text=${text}`;
     } else {
-      // Omitting phone number parameter opens WhatsApp contact selection screen directly on mobile
+      // Omitting phone number parameter opens WhatsApp contact selection screen directly on mobile & desktop
       whatsappUrl = `https://api.whatsapp.com/send?text=${text}`;
     }
 
     // Direct synchronous launch opens WhatsApp app directly on mobile and desktop
     window.open(whatsappUrl, '_blank');
     showToast('Opening WhatsApp to choose contact...');
+
+    // Also trigger PDF receipt download in background so user has file ready to attach
+    setTimeout(() => {
+      handleDownloadPDF();
+    }, 450);
   };
 
   // Send via Email
