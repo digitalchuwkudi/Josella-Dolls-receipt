@@ -326,11 +326,12 @@ export default function App() {
     window.print();
   };
 
-  // Direct Download PDF File with 100% Design Fidelity & Zero Clipping
+  // Direct Download PDF File without opening blank tabs or freezing
   const handleDownloadPDF = async () => {
+    if (isGeneratingPDF) return;
     handleSaveToHistory();
     setIsGeneratingPDF(true);
-    showToast('Generating official high-res PDF receipt...');
+    showToast('Generating official PDF receipt document...');
 
     const sourceElement = document.getElementById('receipt-paper');
     if (!sourceElement) {
@@ -374,16 +375,38 @@ export default function App() {
     };
 
     try {
-      await html2pdf().set(opt).from(clone).save();
-      showToast(`PDF Receipt ${orderNumber}.pdf downloaded!`);
+      // Use .output('blob') to avoid window.open blank tab behavior in iframe sandboxes
+      const pdfBlob: Blob = await Promise.race([
+        html2pdf().set(opt).from(clone).output('blob'),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('PDF Blob Timeout')), 5000)
+        )
+      ]);
+
+      const blobUrl = URL.createObjectURL(pdfBlob);
+      const downloadLink = document.createElement('a');
+      downloadLink.href = blobUrl;
+      downloadLink.download = `Josella_Dolls_Receipt_${orderNumber}.pdf`;
+      document.body.appendChild(downloadLink);
+      downloadLink.click();
+      document.body.removeChild(downloadLink);
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 2000);
+
+      showToast(`PDF Receipt downloaded successfully!`);
     } catch (err) {
-      console.error('PDF Generation Fallback:', err);
-      showToast('Opening print preview to save as PDF...');
-      window.print();
+      console.warn('PDF Blob failed, attempting direct PDF fallback:', err);
+      try {
+        await html2pdf().set(opt).from(clone).save();
+        showToast(`PDF Receipt saved!`);
+      } catch (fallbackErr) {
+        console.error('All PDF save methods failed:', fallbackErr);
+        showToast('Receipt saved to history!');
+      }
     } finally {
       if (document.body.contains(container)) {
         document.body.removeChild(container);
       }
+      // CRITICAL: Always reset generating state so buttons work again immediately
       setIsGeneratingPDF(false);
     }
   };
