@@ -178,6 +178,7 @@ export default function App() {
   const [searchHistoryQuery, setSearchHistoryQuery] = useState<string>('');
   const [stampStyle, setStampStyle] = useState<'classic' | 'modern' | 'minimal'>('classic');
   const [isGeneratingPDF, setIsGeneratingPDF] = useState<boolean>(false);
+  const [downloadModalData, setDownloadModalData] = useState<{ pdfUrl: string; fileName: string } | null>(null);
 
   // Load Saved Receipts from localStorage
   useEffect(() => {
@@ -321,7 +322,7 @@ export default function App() {
     }
   };
 
-  // Direct Download PDF File directly from DOM with zero blank pages and guaranteed state reset
+  // Direct Download PDF File directly from DOM with instant download modal prompt
   const handleDownloadPDF = async () => {
     if (isGeneratingPDF) return;
     handleSaveToHistory();
@@ -360,29 +361,43 @@ export default function App() {
     };
 
     try {
-      // Use .output('blob') to avoid window.open blank tab behavior in iframe sandboxes
-      const pdfBlob: Blob = await Promise.race([
-        html2pdf().set(opt).from(element).output('blob'),
+      // Use .output('datauristring') to create a standalone Data URI
+      const pdfDataUri: string = await Promise.race([
+        html2pdf().set(opt).from(element).output('datauristring'),
         new Promise<never>((_, reject) =>
           setTimeout(() => reject(new Error('PDF Blob Timeout')), 6000)
         )
       ]);
 
-      const blobUrl = URL.createObjectURL(pdfBlob);
+      const fileName = `Josella_Dolls_Receipt_${orderNumber}.pdf`;
+
+      // Trigger auto-download link click
       const downloadLink = document.createElement('a');
-      downloadLink.href = blobUrl;
-      downloadLink.download = `Josella_Dolls_Receipt_${orderNumber}.pdf`;
+      downloadLink.href = pdfDataUri;
+      downloadLink.download = fileName;
       document.body.appendChild(downloadLink);
       downloadLink.click();
       document.body.removeChild(downloadLink);
-      setTimeout(() => URL.revokeObjectURL(blobUrl), 2000);
 
-      showToast(`PDF Receipt downloaded successfully!`);
+      // Open download modal prompt so the user can also click directly if browser sandbox blocked silent click
+      setDownloadModalData({ pdfUrl: pdfDataUri, fileName });
+      showToast(`PDF Receipt generated! Save file below.`);
     } catch (err) {
-      console.warn('PDF Blob failed, attempting direct PDF fallback:', err);
+      console.warn('PDF Data URI failed, trying Blob:', err);
       try {
-        await html2pdf().set(opt).from(element).save();
-        showToast(`PDF Receipt saved!`);
+        const pdfBlob: Blob = await html2pdf().set(opt).from(element).output('blob');
+        const blobUrl = URL.createObjectURL(pdfBlob);
+        const fileName = `Josella_Dolls_Receipt_${orderNumber}.pdf`;
+
+        const downloadLink = document.createElement('a');
+        downloadLink.href = blobUrl;
+        downloadLink.download = fileName;
+        document.body.appendChild(downloadLink);
+        downloadLink.click();
+        document.body.removeChild(downloadLink);
+
+        setDownloadModalData({ pdfUrl: blobUrl, fileName });
+        showToast(`PDF Receipt ready for download!`);
       } catch (fallbackErr) {
         console.error('All PDF save methods failed:', fallbackErr);
         showToast('Receipt saved to history!');
@@ -1427,6 +1442,61 @@ export default function App() {
                 className="px-4 py-1.5 text-xs font-semibold bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg transition-colors"
               >
                 Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* --- PDF DOWNLOAD READY MODAL --- */}
+      {downloadModalData && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 no-print animate-fadeIn">
+          <div className="bg-white rounded-2xl max-w-md w-full p-5 sm:p-6 shadow-2xl border border-slate-200 space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div className="flex items-center gap-2">
+                <FileDown className="w-5 h-5 text-pink-600" />
+                <h3 className="text-sm sm:text-base font-bold text-slate-900">
+                  Your PDF Receipt is Ready
+                </h3>
+              </div>
+              <button
+                onClick={() => setDownloadModalData(null)}
+                className="text-slate-400 hover:text-slate-600 font-bold text-lg px-2"
+              >
+                ✕
+              </button>
+            </div>
+
+            <p className="text-xs text-slate-600 leading-relaxed">
+              Your official PDF receipt for <strong className="text-slate-900">{orderNumber}</strong> has been generated. Click the button below to save the file directly to your device.
+            </p>
+
+            <div className="space-y-3 pt-1">
+              <a
+                href={downloadModalData.pdfUrl}
+                download={downloadModalData.fileName}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={() => {
+                  showToast('Downloading PDF file to your device...');
+                  setTimeout(() => setDownloadModalData(null), 1500);
+                }}
+                className="w-full py-3 px-4 rounded-xl bg-pink-700 hover:bg-pink-800 text-white font-bold text-xs flex items-center justify-center gap-2 shadow-sm transition-all text-center block"
+              >
+                <FileDown className="w-4 h-4 inline" />
+                <span>Save PDF File to Device ({downloadModalData.fileName})</span>
+              </a>
+            </div>
+
+            <div className="pt-2 border-t border-slate-100 flex justify-between items-center text-xs text-slate-500">
+              <span className="text-[11px] font-medium text-emerald-700 flex items-center gap-1">
+                <CheckCircle2 className="w-3.5 h-3.5" /> Saved in History Log
+              </span>
+              <button
+                onClick={() => setDownloadModalData(null)}
+                className="px-3 py-1 text-xs font-semibold bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg transition-colors"
+              >
+                Done
               </button>
             </div>
           </div>
