@@ -321,40 +321,68 @@ export default function App() {
     }
   };
 
-  // Direct Download PDF File with multi-selector lookup & print fallback
+  // PDF Download Function: Converts strictly the Live Receipt Preview into a pristine A4 PDF
   const handleDownloadPDF = async () => {
     if (isGeneratingPDF) return;
     handleSaveToHistory();
     setIsGeneratingPDF(true);
     showToast('Generating official PDF receipt document...');
 
-    // Resilient element lookup across common IDs/classes
-    const element =
+    // 1. Locate the live receipt preview element
+    const sourceElement =
       document.getElementById('receipt-paper') ||
       document.getElementById('receiptContainer') ||
       document.getElementById('receipt') ||
-      document.querySelector('.receipt-card') ||
-      document.querySelector('.receipt-preview');
+      document.querySelector('.receipt-card');
 
-    if (!element) {
+    if (!sourceElement) {
       setIsGeneratingPDF(false);
-      showToast('Receipt element not found. Opening print view...');
-      window.print();
+      showToast('Could not locate receipt preview element. Please try again.');
       return;
     }
 
-    // Store original inline styles so we can restore them immediately after capture
-    const htmlElement = element as HTMLElement;
-    const originalWidth = htmlElement.style.width;
-    const originalMaxWidth = htmlElement.style.maxWidth;
+    // 2. Create a temporary render container to hold a clone of ONLY the receipt paper.
+    // Positioned fixed behind the viewport (z-index -99999) with explicit A4 width (800px)
+    // so it renders with 100% visibility to html2canvas even if the preview tab is hidden on mobile.
+    const tempWrapper = document.createElement('div');
+    tempWrapper.id = 'temp-pdf-render-container';
+    tempWrapper.style.position = 'fixed';
+    tempWrapper.style.left = '0';
+    tempWrapper.style.top = '0';
+    tempWrapper.style.width = '800px';
+    tempWrapper.style.zIndex = '-99999';
+    tempWrapper.style.opacity = '1';
+    tempWrapper.style.pointerEvents = 'none';
+    tempWrapper.style.backgroundColor = '#ffffff';
 
-    // Temporarily expand width to standard A4 (800px) during capture so mobile/tablet screens capture full width
-    htmlElement.style.width = '800px';
-    htmlElement.style.maxWidth = 'none';
+    // 3. Clone ONLY the actual receipt paper element
+    const clone = sourceElement.cloneNode(true) as HTMLElement;
+
+    // Remove any non-print UI controls or interactive elements inside the clone if present
+    const noPrintItems = clone.querySelectorAll('.no-print');
+    noPrintItems.forEach((el) => el.remove());
+
+    // Apply clean A4 portrait dimensions and explicit white background to the cloned receipt
+    clone.style.width = '800px';
+    clone.style.maxWidth = 'none';
+    clone.style.margin = '0';
+    clone.style.padding = '36px';
+    clone.style.display = 'block';
+    clone.style.visibility = 'visible';
+    clone.style.boxShadow = 'none';
+    clone.style.borderRadius = '0';
+    clone.style.border = '1px solid #e2e8f0';
+    clone.style.backgroundColor = '#ffffff';
+
+    tempWrapper.appendChild(clone);
+    document.body.appendChild(tempWrapper);
+
+    const safeOrderNum = (orderNumber || 'JD-2026-1001').replace(/[^a-zA-Z0-9_-]/g, '_');
+    const pdfFilename = `Josella_Dolls_Receipt_${safeOrderNum}.pdf`;
 
     const opt = {
-      margin: 6,
-      filename: `Josella_Dolls_Receipt_${orderNumber}.pdf`,
+      margin: 8,
+      filename: pdfFilename,
       image: { type: 'jpeg' as const, quality: 0.98 },
       html2canvas: {
         scale: 2,
@@ -370,18 +398,16 @@ export default function App() {
     };
 
     try {
-      await html2pdf().set(opt).from(htmlElement).save();
-      showToast(`PDF Receipt ${orderNumber}.pdf downloaded!`);
+      await html2pdf().set(opt).from(clone).save();
+      showToast(`PDF Receipt ${pdfFilename} downloaded!`);
     } catch (err) {
       console.error('PDF Generation Error:', err);
-      showToast('PDF export fallback: opening print view to save...');
-      window.print();
+      showToast('Failed to generate PDF. Please try again.');
     } finally {
-      // Restore original element inline styles
-      htmlElement.style.width = originalWidth;
-      htmlElement.style.maxWidth = originalMaxWidth;
-
-      // CRITICAL: Always reset generating state so buttons work again immediately
+      // 4. Clean up temporary DOM element and reset generating state
+      if (document.body.contains(tempWrapper)) {
+        document.body.removeChild(tempWrapper);
+      }
       setIsGeneratingPDF(false);
     }
   };
