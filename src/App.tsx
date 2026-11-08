@@ -321,61 +321,29 @@ export default function App() {
     }
   };
 
-  // Direct Download PDF File: Clones the Live Receipt Preview into an isolated A4 render container
-  const handleDownloadPDF = async (): Promise<boolean> => {
-    if (isGeneratingPDF) return false;
+  // Direct Download PDF File directly from visible DOM
+  const handleDownloadPDF = async (): Promise<Blob | null> => {
+    if (isGeneratingPDF) return null;
     handleSaveToHistory();
     setIsGeneratingPDF(true);
     showToast('Generating official PDF receipt document...');
 
-    const safetyTimer = setTimeout(() => {
-      setIsGeneratingPDF(false);
-    }, 5000);
+    // If on mobile and currently viewing editor, temporarily show preview for capture
+    const wasEditorTab = activeTab === 'editor';
+    if (wasEditorTab) {
+      setActiveTab('preview');
+      await new Promise((r) => setTimeout(r, 150)); // Allow DOM layout repaint
+    }
 
     const sourceElement = document.getElementById('receipt-paper');
     if (!sourceElement) {
-      clearTimeout(safetyTimer);
       setIsGeneratingPDF(false);
       showToast('Could not locate live receipt preview element.');
-      return false;
+      return null;
     }
 
     const safeOrderNum = (orderNumber || 'JD-2026-1001').replace(/[^a-zA-Z0-9_-]/g, '_');
     const fileName = `Josella_Dolls_Receipt_${safeOrderNum}.pdf`;
-
-    // Create a temporary visible rendering container for html2canvas
-    const renderDiv = document.createElement('div');
-    renderDiv.id = 'pdf-export-container';
-    renderDiv.style.position = 'fixed';
-    renderDiv.style.left = '0';
-    renderDiv.style.top = '0';
-    renderDiv.style.width = '794px'; // Standard A4 pixel width @ 96 DPI
-    renderDiv.style.zIndex = '-99999';
-    renderDiv.style.opacity = '1';
-    renderDiv.style.visibility = 'visible';
-    renderDiv.style.display = 'block';
-    renderDiv.style.backgroundColor = '#ffffff';
-
-    // Clone the actual receipt paper element
-    const clone = sourceElement.cloneNode(true) as HTMLElement;
-    clone.removeAttribute('id');
-
-    // Remove any non-printable elements inside the clone
-    clone.querySelectorAll('.no-print').forEach((el) => el.remove());
-
-    // Explicit A4 styling on the clone
-    clone.style.width = '794px';
-    clone.style.maxWidth = 'none';
-    clone.style.margin = '0';
-    clone.style.padding = '32px';
-    clone.style.display = 'block';
-    clone.style.visibility = 'visible';
-    clone.style.backgroundColor = '#ffffff';
-    clone.style.boxShadow = 'none';
-    clone.style.border = '1px solid #e2e8f0';
-
-    renderDiv.appendChild(clone);
-    document.body.appendChild(renderDiv);
 
     const opt = {
       margin: 8,
@@ -386,11 +354,9 @@ export default function App() {
         useCORS: true,
         allowTaint: true,
         logging: false,
-        width: 794,
-        windowWidth: 794,
+        backgroundColor: '#ffffff',
         scrollX: 0,
-        scrollY: 0,
-        backgroundColor: '#ffffff'
+        scrollY: 0
       },
       jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' as const }
     };
@@ -400,31 +366,74 @@ export default function App() {
         try {
           await document.fonts.ready;
         } catch (e) {
-          console.warn('Font loading check:', e);
+          console.warn('Font check error:', e);
         }
       }
 
-      await html2pdf().set(opt).from(clone).save();
+      // Generate PDF Blob using html2pdf worker
+      const worker = html2pdf().set(opt).from(sourceElement).toPdf();
+      const pdf = await worker.get('pdf');
+      const pdfBlob: Blob = pdf.output('blob');
+
+      if (!pdfBlob || pdfBlob.size === 0) {
+        throw new Error('Generated PDF Blob was empty');
+      }
+
+      // Trigger direct link file download
+      const blobUrl = URL.createObjectURL(pdfBlob);
+      const downloadAnchor = document.createElement('a');
+      downloadAnchor.href = blobUrl;
+      downloadAnchor.download = fileName;
+      downloadAnchor.style.display = 'none';
+      document.body.appendChild(downloadAnchor);
+      downloadAnchor.click();
+      document.body.removeChild(downloadAnchor);
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 3000);
+
       showToast(`PDF Receipt ${fileName} downloaded!`);
+      return pdfBlob;
     } catch (err) {
       console.error('PDF Generation Error:', err);
-      showToast('Failed to generate PDF. Please try again.');
+      showToast('Opening print dialog to save as PDF...');
+      window.print();
+      return null;
     } finally {
-      clearTimeout(safetyTimer);
-      if (document.body.contains(renderDiv)) {
-        document.body.removeChild(renderDiv);
+      if (wasEditorTab) {
+        setTimeout(() => setActiveTab('editor'), 600);
       }
       setIsGeneratingPDF(false);
     }
-
-    return true;
   };
 
-  // Send via WhatsApp (SYNCHRONOUS DIRECT OPEN TO WHATSAPP CONTACT SELECTION)
-  const handleSendWhatsAppPDF = () => {
-    handleSaveToHistory();
+  // Send via WhatsApp (SHARES ACTUAL VISUAL PDF FILE DIRECTLY TO WHATSAPP)
+  const handleSendWhatsAppPDF = async () => {
     setShareModalOpen(false);
+    showToast('Preparing visual PDF receipt for WhatsApp...');
 
+    const pdfBlob = await handleDownloadPDF();
+
+    const safeOrderNum = (orderNumber || 'JD-2026-1001').replace(/[^a-zA-Z0-9_-]/g, '_');
+    const fileName = `Josella_Dolls_Receipt_${safeOrderNum}.pdf`;
+
+    // If native file sharing is supported (iOS, Android, & modern Web Share browsers)
+    if (pdfBlob && navigator.canShare) {
+      try {
+        const pdfFile = new File([pdfBlob], fileName, { type: 'application/pdf' });
+        if (navigator.canShare({ files: [pdfFile] })) {
+          await navigator.share({
+            files: [pdfFile],
+            title: `Josella Dolls Receipt ${orderNumber}`,
+            text: `Official Purchase Receipt for ${customerName || 'Valued Customer'} (${orderNumber})`
+          });
+          showToast('Shared visual PDF receipt to WhatsApp!');
+          return;
+        }
+      } catch (shareErr) {
+        console.warn('Native Web Share file export failed or cancelled:', shareErr);
+      }
+    }
+
+    // Fallback for browsers without native file sharing
     let phoneNum = customerPhone.replace(/[^0-9]/g, '');
     const clientNameStr = customerName ? customerName : 'Valued Customer';
     
@@ -434,46 +443,53 @@ export default function App() {
     message += `Order #: *${orderNumber}*\n`;
     message += `Date: *${orderDate}*\n`;
     message += `Customer: *${clientNameStr}*\n`;
+    message += `Total Amount: *${formatCurrency(grandTotal, currency)}*\n`;
     message += `Payment Status: *${orderStatus}*\n`;
     message += `-----------------------------------\n`;
-    message += `ITEMS:\n`;
-    items.forEach((item, idx) => {
-      if (item.description || item.unitPrice > 0) {
-        message += `${idx + 1}. ${item.description || 'Item'} (x${item.quantity}) - ${formatCurrency(item.quantity * item.unitPrice, currency)}\n`;
-      }
-    });
-    message += `-----------------------------------\n`;
-    message += `TOTAL AMOUNT: *${formatCurrency(grandTotal, currency)}*\n`;
-    message += `-----------------------------------\n`;
-    message += `WhatsApp: +229 90 08 34 61 | Cotonou, Benin Republic\n`;
-    message += `Thank you for shopping with Josella Dolls!`;
+    message += `(The official PDF receipt ${fileName} has been saved to your device. Attach it to this chat).\n`;
 
     const text = encodeURIComponent(message);
-    let whatsappUrl = '';
-    if (phoneNum.length >= 8) {
-      whatsappUrl = `https://wa.me/${phoneNum}?text=${text}`;
-    } else {
-      whatsappUrl = `https://wa.me/22990083461?text=${text}`;
-    }
+    let whatsappUrl = phoneNum.length >= 8 
+      ? `https://wa.me/${phoneNum}?text=${text}`
+      : `https://wa.me/22990083461?text=${text}`;
 
-    // Direct synchronous open launches WhatsApp immediately to select contact
     window.open(whatsappUrl, '_blank');
-    showToast('Opened WhatsApp directly with receipt details');
   };
 
-  // Send via Email (SYNCHRONOUS DIRECT OPEN)
-  const handleSendEmailPDF = () => {
-    handleSaveToHistory();
+  // Send via Email (SHARES VISUAL PDF FILE)
+  const handleSendEmailPDF = async () => {
     setShareModalOpen(false);
+    showToast('Preparing visual PDF receipt for Email...');
+
+    const pdfBlob = await handleDownloadPDF();
+
+    const safeOrderNum = (orderNumber || 'JD-2026-1001').replace(/[^a-zA-Z0-9_-]/g, '_');
+    const fileName = `Josella_Dolls_Receipt_${safeOrderNum}.pdf`;
+
+    if (pdfBlob && navigator.canShare) {
+      try {
+        const pdfFile = new File([pdfBlob], fileName, { type: 'application/pdf' });
+        if (navigator.canShare({ files: [pdfFile] })) {
+          await navigator.share({
+            files: [pdfFile],
+            title: `Official Purchase Receipt ${orderNumber} - Josella Dolls`,
+            text: `Official Purchase Receipt for ${customerName || 'Valued Customer'} (${orderNumber})`
+          });
+          showToast('Shared visual PDF receipt!');
+          return;
+        }
+      } catch (e) {
+        console.warn('Share check:', e);
+      }
+    }
 
     const clientNameStr = customerName ? customerName : 'Valued Customer';
     const subject = encodeURIComponent(`Official Purchase Receipt ${orderNumber} - Josella Dolls`);
     const body = encodeURIComponent(
-      `Dear ${clientNameStr},\n\nThank you for your order from Josella Dolls Luxury Beauty, Esthetic & Spa Product and Equipment suppliers.\n\nSummary:\nOrder #: ${orderNumber}\nDate: ${orderDate}\nGrand Total: ${formatCurrency(grandTotal, currency)}\nStatus: ${orderStatus}\n\nWarm regards,\nJosella Dolls Team\nCotonou, Benin Republic\nWhatsApp: +229 90 08 34 61`
+      `Dear ${clientNameStr},\n\nThank you for your order from Josella Dolls Luxury Beauty, Esthetic & Spa Product and Equipment suppliers.\n\nSummary:\nOrder #: ${orderNumber}\nDate: ${orderDate}\nGrand Total: ${formatCurrency(grandTotal, currency)}\nStatus: ${orderStatus}\n\nThe official PDF receipt (${fileName}) has been saved to your device downloads folder.\n\nWarm regards,\nJosella Dolls Team\nCotonou, Benin Republic\nWhatsApp: +229 90 08 34 61`
     );
 
     window.open(`mailto:?subject=${subject}&body=${body}`, '_blank');
-    showToast('Opened Email app with receipt summary');
   };
 
   // Quick Copy Text Summary
