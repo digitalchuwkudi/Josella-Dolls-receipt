@@ -321,37 +321,61 @@ export default function App() {
     }
   };
 
-  // Direct Download PDF File with 4-second safety timeout guard to ensure buttons NEVER lock up
+  // Direct Download PDF File: Clones the Live Receipt Preview into an isolated A4 render container
   const handleDownloadPDF = async (): Promise<boolean> => {
     if (isGeneratingPDF) return false;
     handleSaveToHistory();
     setIsGeneratingPDF(true);
     showToast('Generating official PDF receipt document...');
 
-    // Safety timeout: Reset generating state after 4 seconds no matter what
     const safetyTimer = setTimeout(() => {
       setIsGeneratingPDF(false);
-    }, 4000);
+    }, 5000);
 
     const sourceElement = document.getElementById('receipt-paper');
     if (!sourceElement) {
       clearTimeout(safetyTimer);
       setIsGeneratingPDF(false);
-      showToast('Opening print dialog to save as PDF...');
-      window.print();
+      showToast('Could not locate live receipt preview element.');
       return false;
     }
 
     const safeOrderNum = (orderNumber || 'JD-2026-1001').replace(/[^a-zA-Z0-9_-]/g, '_');
     const fileName = `Josella_Dolls_Receipt_${safeOrderNum}.pdf`;
 
-    // Store original element dimensions
-    const originalWidth = sourceElement.style.width;
-    const originalMaxWidth = sourceElement.style.maxWidth;
+    // Create a temporary visible rendering container for html2canvas
+    const renderDiv = document.createElement('div');
+    renderDiv.id = 'pdf-export-container';
+    renderDiv.style.position = 'fixed';
+    renderDiv.style.left = '0';
+    renderDiv.style.top = '0';
+    renderDiv.style.width = '794px'; // Standard A4 pixel width @ 96 DPI
+    renderDiv.style.zIndex = '-99999';
+    renderDiv.style.opacity = '1';
+    renderDiv.style.visibility = 'visible';
+    renderDiv.style.display = 'block';
+    renderDiv.style.backgroundColor = '#ffffff';
 
-    // Temporarily set width to 800px A4 during capture
-    sourceElement.style.width = '800px';
-    sourceElement.style.maxWidth = 'none';
+    // Clone the actual receipt paper element
+    const clone = sourceElement.cloneNode(true) as HTMLElement;
+    clone.removeAttribute('id');
+
+    // Remove any non-printable elements inside the clone
+    clone.querySelectorAll('.no-print').forEach((el) => el.remove());
+
+    // Explicit A4 styling on the clone
+    clone.style.width = '794px';
+    clone.style.maxWidth = 'none';
+    clone.style.margin = '0';
+    clone.style.padding = '32px';
+    clone.style.display = 'block';
+    clone.style.visibility = 'visible';
+    clone.style.backgroundColor = '#ffffff';
+    clone.style.boxShadow = 'none';
+    clone.style.border = '1px solid #e2e8f0';
+
+    renderDiv.appendChild(clone);
+    document.body.appendChild(renderDiv);
 
     const opt = {
       margin: 8,
@@ -362,8 +386,8 @@ export default function App() {
         useCORS: true,
         allowTaint: true,
         logging: false,
-        width: 800,
-        windowWidth: 800,
+        width: 794,
+        windowWidth: 794,
         scrollX: 0,
         scrollY: 0,
         backgroundColor: '#ffffff'
@@ -372,27 +396,31 @@ export default function App() {
     };
 
     try {
-      // Wrap save in a Promise.race with a 3.5s timeout so it never hangs indefinitely
-      await Promise.race([
-        html2pdf().set(opt).from(sourceElement).save(),
-        new Promise<void>((resolve) => setTimeout(resolve, 3500))
-      ]);
+      if (document.fonts) {
+        try {
+          await document.fonts.ready;
+        } catch (e) {
+          console.warn('Font loading check:', e);
+        }
+      }
+
+      await html2pdf().set(opt).from(clone).save();
       showToast(`PDF Receipt ${fileName} downloaded!`);
     } catch (err) {
-      console.warn('html2pdf direct save failed, opening native print-to-PDF:', err);
-      showToast('Opening print dialog to save as PDF...');
-      window.print();
+      console.error('PDF Generation Error:', err);
+      showToast('Failed to generate PDF. Please try again.');
     } finally {
       clearTimeout(safetyTimer);
-      sourceElement.style.width = originalWidth;
-      sourceElement.style.maxWidth = originalMaxWidth;
+      if (document.body.contains(renderDiv)) {
+        document.body.removeChild(renderDiv);
+      }
       setIsGeneratingPDF(false);
     }
 
     return true;
   };
 
-  // Send via WhatsApp (SYNCHRONOUS OPEN TO PREVENT BROWSER POPUP BLOCKER)
+  // Send via WhatsApp (SYNCHRONOUS DIRECT OPEN TO WHATSAPP CONTACT SELECTION)
   const handleSendWhatsAppPDF = () => {
     handleSaveToHistory();
     setShareModalOpen(false);
@@ -428,17 +456,12 @@ export default function App() {
       whatsappUrl = `https://wa.me/22990083461?text=${text}`;
     }
 
-    // Direct synchronous window.open bypasses browser popup blockers
+    // Direct synchronous open launches WhatsApp immediately to select contact
     window.open(whatsappUrl, '_blank');
-    showToast('Opening WhatsApp with receipt summary...');
-
-    // Trigger PDF download to device in background
-    setTimeout(() => {
-      handleDownloadPDF();
-    }, 400);
+    showToast('Opened WhatsApp directly with receipt details');
   };
 
-  // Send via Email (SYNCHRONOUS OPEN)
+  // Send via Email (SYNCHRONOUS DIRECT OPEN)
   const handleSendEmailPDF = () => {
     handleSaveToHistory();
     setShareModalOpen(false);
@@ -450,11 +473,7 @@ export default function App() {
     );
 
     window.open(`mailto:?subject=${subject}&body=${body}`, '_blank');
-    showToast('Opening Email app...');
-
-    setTimeout(() => {
-      handleDownloadPDF();
-    }, 400);
+    showToast('Opened Email app with receipt summary');
   };
 
   // Quick Copy Text Summary
