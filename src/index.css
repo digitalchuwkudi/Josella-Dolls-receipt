@@ -1,0 +1,58 @@
+@import "tailwindcss";
+
+@layer utilities {
+  .font-serif-luxury {
+    font-family: 'Playfair Display', 'Cormorant Garamond', Georgia, serif;
+  }
+  .font-serif-display {
+    font-family: 'Cormorant Garamond', 'Playfair Display', Georgia, serif;
+  }
+  .font-sans-clean {
+    font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+  }
+}
+
+/* Custom Print Styles */
+@media print {
+  body {
+    background-color: #ffffff !important;
+    color: #1a1a1a !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  /* Hide app navigation, sidebar control panel, action buttons, modals, toasts */
+  .no-print, 
+  header, 
+  nav, 
+  .sidebar-controls, 
+  .action-bar,
+  .history-drawer,
+  button,
+  .toast-container {
+    display: none !important;
+  }
+
+  /* Style the receipt sheet specifically for print */
+  #receipt-paper {
+    box-shadow: none !important;
+    border: 1px solid #e2e8f0 !important;
+    margin: 0 auto !important;
+    padding: 2.5rem !important;
+    max-width: 100% !important;
+    width: 100% !important;
+    background: #ffffff !important;
+    page-break-inside: avoid;
+  }
+
+  .print-only {
+    display: block !important;
+  }
+  
+  @page {
+    size: A4 portrait;
+    margin: 12mm 15mm 12mm 15mm;
+  }
+}
