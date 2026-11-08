@@ -321,43 +321,26 @@ export default function App() {
     }
   };
 
-  // Print Action
-  const handlePrint = () => {
-    window.print();
-  };
-
-  // Direct Download PDF File without opening blank tabs or freezing
+  // Direct Download PDF File directly from DOM with zero blank pages and guaranteed state reset
   const handleDownloadPDF = async () => {
     if (isGeneratingPDF) return;
     handleSaveToHistory();
     setIsGeneratingPDF(true);
     showToast('Generating official PDF receipt document...');
 
-    const sourceElement = document.getElementById('receipt-paper');
-    if (!sourceElement) {
+    const element = document.getElementById('receipt-paper');
+    if (!element) {
       setIsGeneratingPDF(false);
       return;
     }
 
-    // Create a temporary off-screen container with explicit 800px A4 dimensions
-    // so mobile/tablet screens never clip or squish the captured PDF receipt
-    const container = document.createElement('div');
-    container.style.position = 'absolute';
-    container.style.left = '-9999px';
-    container.style.top = '-9999px';
-    container.style.width = '800px';
-    container.style.backgroundColor = '#ffffff';
+    // Store original inline styles so we can restore them immediately after capture
+    const originalWidth = element.style.width;
+    const originalMaxWidth = element.style.maxWidth;
 
-    const clone = sourceElement.cloneNode(true) as HTMLElement;
-    clone.style.width = '800px';
-    clone.style.maxWidth = 'none';
-    clone.style.padding = '36px';
-    clone.style.boxShadow = 'none';
-    clone.style.borderRadius = '0';
-    clone.style.border = '1px solid #e2e8f0';
-
-    container.appendChild(clone);
-    document.body.appendChild(container);
+    // Temporarily expand width to standard A4 (800px) during capture so mobile/tablet screens capture full width
+    element.style.width = '800px';
+    element.style.maxWidth = 'none';
 
     const opt = {
       margin: 6,
@@ -369,7 +352,9 @@ export default function App() {
         allowTaint: true,
         logging: false,
         width: 800,
-        windowWidth: 800
+        windowWidth: 800,
+        scrollX: 0,
+        scrollY: 0
       },
       jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' as const }
     };
@@ -377,9 +362,9 @@ export default function App() {
     try {
       // Use .output('blob') to avoid window.open blank tab behavior in iframe sandboxes
       const pdfBlob: Blob = await Promise.race([
-        html2pdf().set(opt).from(clone).output('blob'),
+        html2pdf().set(opt).from(element).output('blob'),
         new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error('PDF Blob Timeout')), 5000)
+          setTimeout(() => reject(new Error('PDF Blob Timeout')), 6000)
         )
       ]);
 
@@ -396,16 +381,17 @@ export default function App() {
     } catch (err) {
       console.warn('PDF Blob failed, attempting direct PDF fallback:', err);
       try {
-        await html2pdf().set(opt).from(clone).save();
+        await html2pdf().set(opt).from(element).save();
         showToast(`PDF Receipt saved!`);
       } catch (fallbackErr) {
         console.error('All PDF save methods failed:', fallbackErr);
         showToast('Receipt saved to history!');
       }
     } finally {
-      if (document.body.contains(container)) {
-        document.body.removeChild(container);
-      }
+      // Restore original element inline styles
+      element.style.width = originalWidth;
+      element.style.maxWidth = originalMaxWidth;
+
       // CRITICAL: Always reset generating state so buttons work again immediately
       setIsGeneratingPDF(false);
     }
@@ -1043,17 +1029,10 @@ export default function App() {
                 <button
                   onClick={handleDownloadPDF}
                   disabled={isGeneratingPDF}
-                  className="px-3 py-1.5 text-xs font-bold bg-pink-600 hover:bg-pink-700 text-white rounded-lg transition-colors flex items-center gap-1.5 shadow-2xs disabled:opacity-50"
+                  className="px-3.5 py-1.5 text-xs font-bold bg-pink-600 hover:bg-pink-700 text-white rounded-lg transition-colors flex items-center gap-1.5 shadow-2xs disabled:opacity-50"
                 >
                   <FileDown className="w-3.5 h-3.5" />
-                  {isGeneratingPDF ? 'PDF...' : 'Download PDF'}
-                </button>
-                <button
-                  onClick={handlePrint}
-                  className="px-3 py-1.5 text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg transition-colors flex items-center gap-1.5"
-                >
-                  <Printer className="w-3 h-3" />
-                  Print
+                  {isGeneratingPDF ? 'Generating PDF...' : 'Download PDF'}
                 </button>
               </div>
             </div>
