@@ -323,21 +323,28 @@ export default function App() {
 
   // Direct Download PDF File directly from visible DOM
   const handleDownloadPDF = async (): Promise<Blob | null> => {
+    // Quick guard to prevent double accidental clicks in the same second
     if (isGeneratingPDF) return null;
     handleSaveToHistory();
     setIsGeneratingPDF(true);
     showToast('Generating official PDF receipt document...');
 
+    // Safety timer: GUARANTEES isGeneratingPDF is reset to false within 2.5 seconds no matter what
+    const safetyTimer = setTimeout(() => {
+      setIsGeneratingPDF(false);
+    }, 2500);
+
     // If on mobile and currently viewing editor, switch to preview tab for capture
     const wasEditorTab = activeTab === 'editor';
     if (wasEditorTab) {
       setActiveTab('preview');
-      // Give mobile browsers 350ms to render the live receipt preview container completely
-      await new Promise((r) => setTimeout(r, 350));
+      // Give mobile browsers 300ms to render the live receipt preview container completely
+      await new Promise((r) => setTimeout(r, 300));
     }
 
     const sourceElement = document.getElementById('receipt-paper');
     if (!sourceElement) {
+      clearTimeout(safetyTimer);
       setIsGeneratingPDF(false);
       showToast('Could not locate live receipt preview element.');
       return null;
@@ -371,30 +378,49 @@ export default function App() {
         }
       }
 
-      // Use html2pdf direct .save() engine which calls jsPDF internal file saver (optimized for desktop & mobile)
-      await html2pdf().set(opt).from(sourceElement).save();
+      // Generate the jsPDF instance
+      const worker = html2pdf().set(opt).from(sourceElement).toPdf();
+      const pdf = await worker.get('pdf');
+      
+      // Get arraybuffer & blob for forced octet-stream direct download on mobile & desktop
+      const arrayBuffer = pdf.output('arraybuffer');
+      const octetBlob = new Blob([arrayBuffer], { type: 'application/octet-stream' });
+      const blobUrl = URL.createObjectURL(octetBlob);
+
+      // Create direct invisible download link with forced download attribute
+      const downloadAnchor = document.createElement('a');
+      downloadAnchor.href = blobUrl;
+      downloadAnchor.download = fileName;
+      downloadAnchor.setAttribute('download', fileName);
+      downloadAnchor.style.display = 'none';
+      document.body.appendChild(downloadAnchor);
+      
+      // Trigger instant click
+      downloadAnchor.click();
+      
+      // Cleanup anchor and object URL
+      setTimeout(() => {
+        if (downloadAnchor.parentNode) {
+          downloadAnchor.parentNode.removeChild(downloadAnchor);
+        }
+        URL.revokeObjectURL(blobUrl);
+      }, 3000);
+
+      // Also trigger pdf.save as secondary direct fallback
+      try {
+        pdf.save(fileName);
+      } catch (saveErr) {
+        console.warn('pdf.save secondary call warning:', saveErr);
+      }
 
       showToast(`PDF Receipt ${fileName} downloaded!`);
-      return null;
+      return octetBlob;
     } catch (err) {
       console.error('PDF Generation Error:', err);
-      // Secondary fallback using blob URL anchor if .save() throws on edge browsers
+      // Secondary fallback using html2pdf .save() directly
       try {
-        const worker = html2pdf().set(opt).from(sourceElement).toPdf();
-        const pdf = await worker.get('pdf');
-        const pdfBlob: Blob = pdf.output('blob');
-        if (pdfBlob && pdfBlob.size > 0) {
-          const blobUrl = URL.createObjectURL(pdfBlob);
-          const downloadAnchor = document.createElement('a');
-          downloadAnchor.href = blobUrl;
-          downloadAnchor.download = fileName;
-          downloadAnchor.style.display = 'none';
-          document.body.appendChild(downloadAnchor);
-          downloadAnchor.click();
-          document.body.removeChild(downloadAnchor);
-          setTimeout(() => URL.revokeObjectURL(blobUrl), 4000);
-          showToast(`PDF Receipt ${fileName} downloaded!`);
-        }
+        await html2pdf().set(opt).from(sourceElement).save();
+        showToast(`PDF Receipt ${fileName} downloaded!`);
       } catch (fallbackErr) {
         console.error('Fallback PDF error:', fallbackErr);
         showToast('Opening print dialog to save as PDF...');
@@ -402,10 +428,14 @@ export default function App() {
       }
       return null;
     } finally {
+      clearTimeout(safetyTimer);
       if (wasEditorTab) {
         setTimeout(() => setActiveTab('editor'), 800);
       }
-      setIsGeneratingPDF(false);
+      // Unlocks button state within 1.2s so user can click as many times as they want without refreshing
+      setTimeout(() => {
+        setIsGeneratingPDF(false);
+      }, 1200);
     }
   };
 
@@ -454,7 +484,7 @@ export default function App() {
     // Also trigger PDF receipt download in background so user has file ready to attach
     setTimeout(() => {
       handleDownloadPDF();
-    }, 450);
+    }, 300);
   };
 
   // Send via Email
