@@ -326,33 +326,64 @@ export default function App() {
     window.print();
   };
 
-  // Direct Download PDF File
+  // Direct Download PDF File with 100% Design Fidelity & Zero Clipping
   const handleDownloadPDF = async () => {
     handleSaveToHistory();
     setIsGeneratingPDF(true);
-    showToast('Generating official PDF receipt document...');
-    const element = document.getElementById('receipt-paper');
-    if (!element) {
+    showToast('Generating official high-res PDF receipt...');
+
+    const sourceElement = document.getElementById('receipt-paper');
+    if (!sourceElement) {
       setIsGeneratingPDF(false);
       return;
     }
 
+    // Create a temporary off-screen container with explicit 800px A4 dimensions
+    // so mobile/tablet screens never clip or squish the captured PDF receipt
+    const container = document.createElement('div');
+    container.style.position = 'absolute';
+    container.style.left = '-9999px';
+    container.style.top = '-9999px';
+    container.style.width = '800px';
+    container.style.backgroundColor = '#ffffff';
+
+    const clone = sourceElement.cloneNode(true) as HTMLElement;
+    clone.style.width = '800px';
+    clone.style.maxWidth = 'none';
+    clone.style.padding = '36px';
+    clone.style.boxShadow = 'none';
+    clone.style.borderRadius = '0';
+    clone.style.border = '1px solid #e2e8f0';
+
+    container.appendChild(clone);
+    document.body.appendChild(container);
+
     const opt = {
-      margin: 8,
+      margin: 6,
       filename: `Josella_Dolls_Receipt_${orderNumber}.pdf`,
       image: { type: 'jpeg' as const, quality: 0.98 },
-      html2canvas: { scale: 2, useCORS: true, logging: false },
+      html2canvas: {
+        scale: 2,
+        useCORS: true,
+        allowTaint: true,
+        logging: false,
+        width: 800,
+        windowWidth: 800
+      },
       jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' as const }
     };
 
     try {
-      await html2pdf().set(opt).from(element).save();
+      await html2pdf().set(opt).from(clone).save();
       showToast(`PDF Receipt ${orderNumber}.pdf downloaded!`);
     } catch (err) {
       console.error('PDF Generation Fallback:', err);
-      showToast('Opening print system to save as PDF...');
+      showToast('Opening print preview to save as PDF...');
       window.print();
     } finally {
+      if (document.body.contains(container)) {
+        document.body.removeChild(container);
+      }
       setIsGeneratingPDF(false);
     }
   };
@@ -565,13 +596,13 @@ export default function App() {
 
       {/* --- MAIN CONTENT LAYOUT (SPACIOUS 2-COLUMN DESKTOP SPLIT AT LG >= 1024px) --- */}
       <main className="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 lg:p-8">
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 xl:gap-8 items-start">
           
           {/* ========================================================================= */}
           {/* LEFT PANEL: INTERACTIVE FORM CONTROLS                                    */}
           {/* ========================================================================= */}
           <div
-            className={`lg:col-span-6 space-y-6 sidebar-controls no-print ${
+            className={`lg:col-span-6 xl:col-span-5 space-y-6 sidebar-controls no-print ${
               activeTab === 'editor' ? 'block' : 'hidden lg:block'
             }`}
           >
@@ -1136,9 +1167,9 @@ export default function App() {
                 </div>
 
                 {/* --- 4. TOTALS & STAMP ROW --- */}
-                <div className="grid grid-cols-1 sm:grid-cols-12 gap-5 items-end mb-5 pt-1">
+                <div className="grid grid-cols-1 md:grid-cols-12 gap-5 items-end mb-5 pt-1">
                   {/* Digital Stamp & Authorization Signature */}
-                  <div className="sm:col-span-6 space-y-3">
+                  <div className="md:col-span-5 space-y-3">
                     {/* Visual Status Stamp - Shown strictly when orderStatus is Paid */}
                     <div className="flex items-center gap-3">
                       {orderStatus === 'Paid' ? (
@@ -1192,48 +1223,48 @@ export default function App() {
                   </div>
 
                   {/* Totals Summary */}
-                  <div className="sm:col-span-6 space-y-2 text-xs">
-                    <div className="flex justify-between items-center py-1 border-b border-slate-100 text-slate-600">
-                      <span>Subtotal:</span>
-                      <span className="font-mono font-semibold text-slate-900 whitespace-nowrap">
+                  <div className="md:col-span-7 space-y-2 text-xs">
+                    <div className="flex justify-between items-center py-1 border-b border-slate-100 text-slate-600 gap-2">
+                      <span className="shrink-0">Subtotal:</span>
+                      <span className="font-mono font-semibold text-slate-900 text-right min-w-0 truncate">
                         {formatCurrency(subtotal, currency)}
                       </span>
                     </div>
 
                     {shippingFee > 0 && (
-                      <div className="flex justify-between items-center py-1 border-b border-slate-100 text-slate-600">
-                        <span>Shipping & Handling:</span>
-                        <span className="font-mono font-semibold text-slate-900 whitespace-nowrap">
+                      <div className="flex justify-between items-center py-1 border-b border-slate-100 text-slate-600 gap-2">
+                        <span className="shrink-0">Shipping & Handling:</span>
+                        <span className="font-mono font-semibold text-slate-900 text-right min-w-0 truncate">
                           {formatCurrency(shippingFee, currency)}
                         </span>
                       </div>
                     )}
 
                     {discountAmount > 0 && (
-                      <div className="flex justify-between items-center py-1 border-b border-slate-100 text-emerald-700 font-medium">
-                        <span>Discount ({discountType === 'percent' ? `${discount}%` : 'Fixed'}):</span>
-                        <span className="font-mono font-bold whitespace-nowrap">
+                      <div className="flex justify-between items-center py-1 border-b border-slate-100 text-emerald-700 font-medium gap-2">
+                        <span className="shrink-0">Discount ({discountType === 'percent' ? `${discount}%` : 'Fixed'}):</span>
+                        <span className="font-mono font-bold text-right min-w-0 truncate">
                           -{formatCurrency(discountAmount, currency)}
                         </span>
                       </div>
                     )}
 
                     {taxAmount > 0 && (
-                      <div className="flex justify-between items-center py-1 border-b border-slate-100 text-slate-600">
-                        <span>Tax ({taxRate}%):</span>
-                        <span className="font-mono font-semibold text-slate-900 whitespace-nowrap">
+                      <div className="flex justify-between items-center py-1 border-b border-slate-100 text-slate-600 gap-2">
+                        <span className="shrink-0">Tax ({taxRate}%):</span>
+                        <span className="font-mono font-semibold text-slate-900 text-right min-w-0 truncate">
                           {formatCurrency(taxAmount, currency)}
                         </span>
                       </div>
                     )}
 
-                    {/* Highlighted Grand Total Box (Extra Breathing Room for Millions of FCFA) */}
-                    <div className="bg-pink-100/90 border border-pink-200/90 rounded-2xl p-3 sm:p-4 flex flex-col sm:flex-row justify-between sm:items-center gap-2 font-bold text-pink-950 shadow-2xs">
+                    {/* Highlighted Grand Total Box (Optimized for High Numbers in FCFA) */}
+                    <div className="bg-pink-100/90 border border-pink-200/90 rounded-2xl p-3 sm:p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-1.5 sm:gap-2 font-bold text-pink-950 shadow-2xs overflow-hidden">
                       <span className="text-xs uppercase tracking-wider flex items-center gap-1.5 shrink-0">
                         <span>Grand Total:</span>
                         <DoodleSparkle className="w-3.5 h-3.5 text-pink-600 opacity-80" />
                       </span>
-                      <span className="font-mono text-base sm:text-xl font-bold text-pink-900 whitespace-nowrap tracking-tight">
+                      <span className="font-mono text-sm sm:text-base lg:text-base xl:text-lg font-bold text-pink-900 tracking-tight text-left sm:text-right shrink min-w-0 break-words">
                         {formatCurrency(grandTotal, currency)}
                       </span>
                     </div>
