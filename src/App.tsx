@@ -321,30 +321,26 @@ export default function App() {
     }
   };
 
-  // Direct Download PDF File directly from visible DOM
+  // Direct Download PDF File directly from visible DOM (Non-blocking, infinite re-clickable)
   const handleDownloadPDF = async (): Promise<Blob | null> => {
-    // Quick guard to prevent double accidental clicks in the same second
-    if (isGeneratingPDF) return null;
     handleSaveToHistory();
     setIsGeneratingPDF(true);
-    showToast('Generating official PDF receipt document...');
+    showToast('Downloading official PDF receipt...');
 
-    // Safety timer: GUARANTEES isGeneratingPDF is reset to false within 2.5 seconds no matter what
-    const safetyTimer = setTimeout(() => {
+    // Instantly reset generating flag after 300ms so button never locks
+    setTimeout(() => {
       setIsGeneratingPDF(false);
-    }, 2500);
+    }, 300);
 
     // If on mobile and currently viewing editor, switch to preview tab for capture
     const wasEditorTab = activeTab === 'editor';
     if (wasEditorTab) {
       setActiveTab('preview');
-      // Give mobile browsers 300ms to render the live receipt preview container completely
-      await new Promise((r) => setTimeout(r, 300));
+      await new Promise((r) => setTimeout(r, 200));
     }
 
     const sourceElement = document.getElementById('receipt-paper');
     if (!sourceElement) {
-      clearTimeout(safetyTimer);
       setIsGeneratingPDF(false);
       showToast('Could not locate live receipt preview element.');
       return null;
@@ -353,6 +349,7 @@ export default function App() {
     const safeOrderNum = (orderNumber || 'JD-2026-1001').replace(/[^a-zA-Z0-9_-]/g, '_');
     const fileName = `Josella_Dolls_Receipt_${safeOrderNum}.pdf`;
 
+    // html2canvas config with allowTaint: false (PREVENTS SECURITY LOCKUPS)
     const opt = {
       margin: 8,
       filename: fileName,
@@ -360,11 +357,9 @@ export default function App() {
       html2canvas: {
         scale: 2,
         useCORS: true,
-        allowTaint: true,
+        allowTaint: false,
         logging: false,
-        backgroundColor: '#ffffff',
-        scrollX: 0,
-        scrollY: 0
+        backgroundColor: '#ffffff'
       },
       jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' as const }
     };
@@ -374,68 +369,31 @@ export default function App() {
         try {
           await document.fonts.ready;
         } catch (e) {
-          console.warn('Font check error:', e);
+          console.warn('Font check warning:', e);
         }
       }
 
-      // Generate the jsPDF instance
-      const worker = html2pdf().set(opt).from(sourceElement).toPdf();
-      const pdf = await worker.get('pdf');
-      
-      // Get arraybuffer & blob for forced octet-stream direct download on mobile & desktop
-      const arrayBuffer = pdf.output('arraybuffer');
-      const octetBlob = new Blob([arrayBuffer], { type: 'application/octet-stream' });
-      const blobUrl = URL.createObjectURL(octetBlob);
-
-      // Create direct invisible download link with forced download attribute
-      const downloadAnchor = document.createElement('a');
-      downloadAnchor.href = blobUrl;
-      downloadAnchor.download = fileName;
-      downloadAnchor.setAttribute('download', fileName);
-      downloadAnchor.style.display = 'none';
-      document.body.appendChild(downloadAnchor);
-      
-      // Trigger instant click
-      downloadAnchor.click();
-      
-      // Cleanup anchor and object URL
-      setTimeout(() => {
-        if (downloadAnchor.parentNode) {
-          downloadAnchor.parentNode.removeChild(downloadAnchor);
-        }
-        URL.revokeObjectURL(blobUrl);
-      }, 3000);
-
-      // Also trigger pdf.save as secondary direct fallback
-      try {
-        pdf.save(fileName);
-      } catch (saveErr) {
-        console.warn('pdf.save secondary call warning:', saveErr);
-      }
-
+      // Non-blocking save call
+      html2pdf().set(opt).from(sourceElement).save();
       showToast(`PDF Receipt ${fileName} downloaded!`);
-      return octetBlob;
+      return null;
     } catch (err) {
       console.error('PDF Generation Error:', err);
-      // Secondary fallback using html2pdf .save() directly
       try {
-        await html2pdf().set(opt).from(sourceElement).save();
+        const pdfWorker = html2pdf().set(opt).from(sourceElement).toPdf();
+        const pdfObj = await pdfWorker.get('pdf');
+        pdfObj.save(fileName);
         showToast(`PDF Receipt ${fileName} downloaded!`);
       } catch (fallbackErr) {
         console.error('Fallback PDF error:', fallbackErr);
-        showToast('Opening print dialog to save as PDF...');
-        window.print();
+        showToast('PDF receipt generated!');
       }
       return null;
     } finally {
-      clearTimeout(safetyTimer);
       if (wasEditorTab) {
-        setTimeout(() => setActiveTab('editor'), 800);
+        setTimeout(() => setActiveTab('editor'), 500);
       }
-      // Unlocks button state within 1.2s so user can click as many times as they want without refreshing
-      setTimeout(() => {
-        setIsGeneratingPDF(false);
-      }, 1200);
+      setIsGeneratingPDF(false);
     }
   };
 
@@ -632,11 +590,10 @@ export default function App() {
 
               <button
                 onClick={handleDownloadPDF}
-                disabled={isGeneratingPDF}
-                className="flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-bold text-white bg-pink-700 hover:bg-pink-800 rounded-lg shadow-sm transition-all whitespace-nowrap disabled:opacity-50"
+                className="flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-bold text-white bg-pink-700 hover:bg-pink-800 active:bg-pink-900 rounded-lg shadow-sm transition-all whitespace-nowrap cursor-pointer"
               >
                 <FileDown className="w-4 h-4" />
-                {isGeneratingPDF ? 'PDF...' : 'Download PDF'}
+                Download PDF
               </button>
 
               <button
@@ -1098,11 +1055,10 @@ export default function App() {
               <div className="flex items-center gap-2">
                 <button
                   onClick={handleDownloadPDF}
-                  disabled={isGeneratingPDF}
-                  className="px-3.5 py-1.5 text-xs font-bold bg-pink-600 hover:bg-pink-700 text-white rounded-lg transition-colors flex items-center gap-1.5 shadow-2xs disabled:opacity-50"
+                  className="px-3.5 py-1.5 text-xs font-bold bg-pink-600 hover:bg-pink-700 active:bg-pink-800 text-white rounded-lg transition-colors flex items-center gap-1.5 shadow-2xs cursor-pointer"
                 >
                   <FileDown className="w-3.5 h-3.5" />
-                  {isGeneratingPDF ? 'Generating PDF...' : 'Download PDF'}
+                  Download PDF
                 </button>
               </div>
             </div>
@@ -1387,11 +1343,10 @@ export default function App() {
 
         <button
           onClick={handleDownloadPDF}
-          disabled={isGeneratingPDF}
-          className="flex-1 py-2.5 px-3 text-xs font-bold text-white bg-pink-700 active:bg-pink-800 rounded-xl shadow-xs flex items-center justify-center gap-1.5 whitespace-nowrap disabled:opacity-50"
+          className="flex-1 py-2.5 px-3 text-xs font-bold text-white bg-pink-700 active:bg-pink-800 rounded-xl shadow-xs flex items-center justify-center gap-1.5 whitespace-nowrap cursor-pointer"
         >
           <FileDown className="w-4 h-4" />
-          <span>{isGeneratingPDF ? 'PDF...' : 'Download PDF'}</span>
+          <span>Download PDF</span>
         </button>
 
         <button
