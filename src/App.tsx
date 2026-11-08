@@ -321,31 +321,25 @@ export default function App() {
     }
   };
 
-  // Direct Download PDF File (Free to click anytime, never locks up)
-  const handleDownloadPDF = async () => {
-    if (isGeneratingPDF) return;
+  // Direct Download PDF File directly from visible DOM
+  const handleDownloadPDF = async (): Promise<Blob | null> => {
+    if (isGeneratingPDF) return null;
     handleSaveToHistory();
     setIsGeneratingPDF(true);
     showToast('Generating official PDF receipt document...');
-
-    // Auto-unlock button state after 800ms so buttons are ALWAYS free to click anytime
-    const unlockTimer = setTimeout(() => {
-      setIsGeneratingPDF(false);
-    }, 800);
 
     // If on mobile and currently viewing editor, temporarily show preview for capture
     const wasEditorTab = activeTab === 'editor';
     if (wasEditorTab) {
       setActiveTab('preview');
-      await new Promise((r) => setTimeout(r, 120)); // Allow DOM layout repaint
+      await new Promise((r) => setTimeout(r, 150)); // Allow DOM layout repaint
     }
 
     const sourceElement = document.getElementById('receipt-paper');
     if (!sourceElement) {
-      clearTimeout(unlockTimer);
       setIsGeneratingPDF(false);
-      showToast('Could not locate receipt preview element.');
-      return;
+      showToast('Could not locate live receipt preview element.');
+      return null;
     }
 
     const safeOrderNum = (orderNumber || 'JD-2026-1001').replace(/[^a-zA-Z0-9_-]/g, '_');
@@ -371,28 +365,75 @@ export default function App() {
       if (document.fonts) {
         try {
           await document.fonts.ready;
-        } catch (e) {}
+        } catch (e) {
+          console.warn('Font check error:', e);
+        }
       }
 
-      await html2pdf().set(opt).from(sourceElement).save();
+      // Generate PDF Blob using html2pdf worker
+      const worker = html2pdf().set(opt).from(sourceElement).toPdf();
+      const pdf = await worker.get('pdf');
+      const pdfBlob: Blob = pdf.output('blob');
+
+      if (!pdfBlob || pdfBlob.size === 0) {
+        throw new Error('Generated PDF Blob was empty');
+      }
+
+      // Trigger direct link file download
+      const blobUrl = URL.createObjectURL(pdfBlob);
+      const downloadAnchor = document.createElement('a');
+      downloadAnchor.href = blobUrl;
+      downloadAnchor.download = fileName;
+      downloadAnchor.style.display = 'none';
+      document.body.appendChild(downloadAnchor);
+      downloadAnchor.click();
+      document.body.removeChild(downloadAnchor);
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 3000);
+
       showToast(`PDF Receipt ${fileName} downloaded!`);
+      return pdfBlob;
     } catch (err) {
-      console.warn('PDF save error:', err);
-      showToast('Downloading receipt...');
+      console.error('PDF Generation Error:', err);
+      showToast('Opening print dialog to save as PDF...');
+      window.print();
+      return null;
     } finally {
-      clearTimeout(unlockTimer);
       if (wasEditorTab) {
-        setTimeout(() => setActiveTab('editor'), 400);
+        setTimeout(() => setActiveTab('editor'), 600);
       }
       setIsGeneratingPDF(false);
     }
   };
 
-  // Send via WhatsApp (OPENS STRAIGHT IN WHATSAPP - ZERO FILE MANAGER PROMPTS)
-  const handleSendWhatsAppPDF = () => {
-    handleSaveToHistory();
+  // Send via WhatsApp (SHARES ACTUAL VISUAL PDF FILE DIRECTLY TO WHATSAPP)
+  const handleSendWhatsAppPDF = async () => {
     setShareModalOpen(false);
+    showToast('Preparing visual PDF receipt for WhatsApp...');
 
+    const pdfBlob = await handleDownloadPDF();
+
+    const safeOrderNum = (orderNumber || 'JD-2026-1001').replace(/[^a-zA-Z0-9_-]/g, '_');
+    const fileName = `Josella_Dolls_Receipt_${safeOrderNum}.pdf`;
+
+    // If native file sharing is supported (iOS, Android, & modern Web Share browsers)
+    if (pdfBlob && navigator.canShare) {
+      try {
+        const pdfFile = new File([pdfBlob], fileName, { type: 'application/pdf' });
+        if (navigator.canShare({ files: [pdfFile] })) {
+          await navigator.share({
+            files: [pdfFile],
+            title: `Josella Dolls Receipt ${orderNumber}`,
+            text: `Official Purchase Receipt for ${customerName || 'Valued Customer'} (${orderNumber})`
+          });
+          showToast('Shared visual PDF receipt to WhatsApp!');
+          return;
+        }
+      } catch (shareErr) {
+        console.warn('Native Web Share file export failed or cancelled:', shareErr);
+      }
+    }
+
+    // Fallback for browsers without native file sharing
     let phoneNum = customerPhone.replace(/[^0-9]/g, '');
     const clientNameStr = customerName ? customerName : 'Valued Customer';
     
@@ -402,43 +443,53 @@ export default function App() {
     message += `Order #: *${orderNumber}*\n`;
     message += `Date: *${orderDate}*\n`;
     message += `Customer: *${clientNameStr}*\n`;
+    message += `Total Amount: *${formatCurrency(grandTotal, currency)}*\n`;
     message += `Payment Status: *${orderStatus}*\n`;
     message += `-----------------------------------\n`;
-    message += `ITEMS:\n`;
-    items.forEach((item, idx) => {
-      if (item.description || item.unitPrice > 0) {
-        message += `${idx + 1}. ${item.description || 'Item'} (x${item.quantity}) - ${formatCurrency(item.quantity * item.unitPrice, currency)}\n`;
-      }
-    });
-    message += `-----------------------------------\n`;
-    message += `TOTAL AMOUNT: *${formatCurrency(grandTotal, currency)}*\n`;
-    message += `-----------------------------------\n`;
-    message += `WhatsApp: +229 90 08 34 61 | Cotonou, Benin Republic\n`;
-    message += `Thank you for shopping with Josella Dolls!`;
+    message += `(The official PDF receipt ${fileName} has been saved to your device. Attach it to this chat).\n`;
 
     const text = encodeURIComponent(message);
     let whatsappUrl = phoneNum.length >= 8 
       ? `https://wa.me/${phoneNum}?text=${text}`
       : `https://wa.me/22990083461?text=${text}`;
 
-    // Direct synchronous window.open launches WhatsApp straight to contact selection without file manager
     window.open(whatsappUrl, '_blank');
-    showToast('Opening WhatsApp directly...');
   };
 
-  // Send via Email (OPENS STRAIGHT IN EMAIL APP)
-  const handleSendEmailPDF = () => {
-    handleSaveToHistory();
+  // Send via Email (SHARES VISUAL PDF FILE)
+  const handleSendEmailPDF = async () => {
     setShareModalOpen(false);
+    showToast('Preparing visual PDF receipt for Email...');
+
+    const pdfBlob = await handleDownloadPDF();
+
+    const safeOrderNum = (orderNumber || 'JD-2026-1001').replace(/[^a-zA-Z0-9_-]/g, '_');
+    const fileName = `Josella_Dolls_Receipt_${safeOrderNum}.pdf`;
+
+    if (pdfBlob && navigator.canShare) {
+      try {
+        const pdfFile = new File([pdfBlob], fileName, { type: 'application/pdf' });
+        if (navigator.canShare({ files: [pdfFile] })) {
+          await navigator.share({
+            files: [pdfFile],
+            title: `Official Purchase Receipt ${orderNumber} - Josella Dolls`,
+            text: `Official Purchase Receipt for ${customerName || 'Valued Customer'} (${orderNumber})`
+          });
+          showToast('Shared visual PDF receipt!');
+          return;
+        }
+      } catch (e) {
+        console.warn('Share check:', e);
+      }
+    }
 
     const clientNameStr = customerName ? customerName : 'Valued Customer';
     const subject = encodeURIComponent(`Official Purchase Receipt ${orderNumber} - Josella Dolls`);
     const body = encodeURIComponent(
-      `Dear ${clientNameStr},\n\nThank you for your order from Josella Dolls Luxury Beauty, Esthetic & Spa Product and Equipment suppliers.\n\nSummary:\nOrder #: ${orderNumber}\nDate: ${orderDate}\nGrand Total: ${formatCurrency(grandTotal, currency)}\nStatus: ${orderStatus}\n\nWarm regards,\nJosella Dolls Team\nCotonou, Benin Republic\nWhatsApp: +229 90 08 34 61`
+      `Dear ${clientNameStr},\n\nThank you for your order from Josella Dolls Luxury Beauty, Esthetic & Spa Product and Equipment suppliers.\n\nSummary:\nOrder #: ${orderNumber}\nDate: ${orderDate}\nGrand Total: ${formatCurrency(grandTotal, currency)}\nStatus: ${orderStatus}\n\nThe official PDF receipt (${fileName}) has been saved to your device downloads folder.\n\nWarm regards,\nJosella Dolls Team\nCotonou, Benin Republic\nWhatsApp: +229 90 08 34 61`
     );
 
     window.open(`mailto:?subject=${subject}&body=${body}`, '_blank');
-    showToast('Opening Email app directly...');
   };
 
   // Quick Copy Text Summary
