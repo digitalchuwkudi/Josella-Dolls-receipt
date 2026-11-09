@@ -428,16 +428,21 @@ export default function App() {
     message += `Thank you for shopping with Josella Dolls!`;
 
     const text = encodeURIComponent(message);
-    const whatsappUrl = `https://api.whatsapp.com/send?text=${text}`;
-
-    // Direct synchronous launch opens WhatsApp app directly to contact selection on mobile and desktop
-    window.open(whatsappUrl, '_blank');
+    const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+    
+    if (isMobile) {
+      // Direct mobile native deep-link opens native WhatsApp app to contact selection screen
+      window.location.href = `whatsapp://send?text=${text}`;
+    } else {
+      // Desktop web / app URL
+      window.open(`https://api.whatsapp.com/send?text=${text}`, '_blank');
+    }
     showToast('Opening WhatsApp to choose contact...');
 
     // Also trigger PDF receipt download in background so user has file ready to attach
     setTimeout(() => {
       handleDownloadPDF();
-    }, 200);
+    }, 300);
   };
 
   // Send via Email
