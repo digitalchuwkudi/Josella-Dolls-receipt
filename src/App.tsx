@@ -288,31 +288,88 @@ export default function App() {
 
       let imgData = '';
 
-      // 1. Primary Rendering via html-to-image (Uses native browser SVG foreignObject rendering)
+      // --- LEVEL 1: html-to-image with skipFonts: true (Bypasses CORS font fetch errors) ---
       try {
         imgData = await toPng(sourceElement, {
           quality: 0.98,
           pixelRatio: 2,
           backgroundColor: '#ffffff',
+          skipFonts: true,
           filter: (node: any) => {
             return !(node.classList && node.classList.contains('no-print'));
           }
         });
-      } catch (primaryErr) {
-        console.warn('html-to-image primary render warning, attempting fallback:', primaryErr);
-        // Fallback rendering via html2canvas
-        const canvas = await html2canvas(sourceElement, {
-          scale: 2,
-          useCORS: true,
-          allowTaint: false,
-          logging: false,
-          backgroundColor: '#ffffff',
-          ignoreElements: (el) => Boolean(el.classList && el.classList.contains('no-print'))
-        });
-        imgData = canvas.toDataURL('image/jpeg', 0.98);
+      } catch (err1) {
+        console.warn('Level 1 render warning:', err1);
+
+        // --- LEVEL 2: Native SVG ForeignObject Canvas Rendering ---
+        try {
+          const clone = sourceElement.cloneNode(true) as HTMLElement;
+          const noPrints = clone.querySelectorAll('.no-print');
+          noPrints.forEach((el) => el.remove());
+
+          const styles = Array.from(document.querySelectorAll('style, link[rel="stylesheet"]'))
+            .map((el) => el.outerHTML)
+            .join('\n');
+
+          const width = sourceElement.offsetWidth || 800;
+          const height = sourceElement.offsetHeight || 1100;
+
+          const svgString = `
+            <svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}">
+              <foreignObject width="100%" height="100%">
+                <div xmlns="http://www.w3.org/1999/xhtml">
+                  ${styles}
+                  <div style="background-color: #ffffff; width: ${width}px; min-height: ${height}px; box-sizing: border-box; padding: 20px;">
+                    ${clone.innerHTML}
+                  </div>
+                </div>
+              </foreignObject>
+            </svg>
+          `;
+
+          const svgBlob = new Blob([svgString], { type: 'image/svg+xml;charset=utf-8' });
+          const svgUrl = URL.createObjectURL(svgBlob);
+
+          const svgImg = new Image();
+          svgImg.src = svgUrl;
+          await new Promise((resolve, reject) => {
+            svgImg.onload = resolve;
+            svgImg.onerror = reject;
+          });
+
+          const canvas = document.createElement('canvas');
+          canvas.width = width * 2;
+          canvas.height = height * 2;
+          const ctx = canvas.getContext('2d');
+          if (ctx) {
+            ctx.fillStyle = '#ffffff';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.drawImage(svgImg, 0, 0, canvas.width, canvas.height);
+            imgData = canvas.toDataURL('image/jpeg', 0.95);
+          }
+          URL.revokeObjectURL(svgUrl);
+        } catch (err2) {
+          console.warn('Level 2 render warning:', err2);
+
+          // --- LEVEL 3: html2canvas fallback ---
+          const canvas = await html2canvas(sourceElement, {
+            scale: 2,
+            useCORS: true,
+            allowTaint: false,
+            logging: false,
+            backgroundColor: '#ffffff',
+            ignoreElements: (el) => Boolean(el.classList && el.classList.contains('no-print'))
+          });
+          imgData = canvas.toDataURL('image/jpeg', 0.98);
+        }
       }
 
-      // Load image to determine exact dimensions
+      if (!imgData) {
+        throw new Error('Could not render receipt image.');
+      }
+
+      // Load final image properties
       const img = new Image();
       img.src = imgData;
       await new Promise((resolve) => {
@@ -326,10 +383,11 @@ export default function App() {
       const imgHeight = img.naturalHeight || 1130;
       const pdfHeight = (imgHeight * pdfWidth) / imgWidth;
 
-      pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight);
+      pdf.addImage(imgData, 'JPEG', 0, 0, pdfWidth, pdfHeight);
 
       const pdfBlob = pdf.output('blob');
       const blobUrl = URL.createObjectURL(pdfBlob);
+      const pdfFile = new File([pdfBlob], fileName, { type: 'application/pdf' });
 
       // 1. Direct jsPDF download save
       try {
@@ -354,7 +412,20 @@ export default function App() {
         console.warn('Link download warning:', linkErr);
       }
 
-      // 3. Open interactive PDF Ready modal for direct view/download
+      // 3. Native Web Share API if supported on mobile
+      if (navigator.canShare && navigator.canShare({ files: [pdfFile] })) {
+        try {
+          await navigator.share({
+            title: fileName,
+            text: `Receipt ${orderNumber} - Josella Dolls`,
+            files: [pdfFile]
+          });
+        } catch (shareErr) {
+          console.warn('Web Share warning:', shareErr);
+        }
+      }
+
+      // 4. Open interactive PDF Ready modal
       setPdfReadyModal({
         open: true,
         pdfUrl: blobUrl,
@@ -366,8 +437,13 @@ export default function App() {
       return pdfBlob;
     } catch (err: any) {
       console.error('PDF Generation Error:', err);
-      const errMsg = err?.message ? `Error: ${err.message}` : 'Error generating PDF. Please try again.';
-      showToast(errMsg);
+      showToast('Opening PDF Print Document...');
+
+      try {
+        window.print();
+      } catch (pErr) {
+        console.error('Print fallback error:', pErr);
+      }
       return null;
     } finally {
       setIsGeneratingPDF(false);
