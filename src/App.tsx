@@ -254,10 +254,17 @@ export default function App() {
     showToast('Created new blank receipt');
   };
 
-  // Direct Download & Share PDF File (Works 100% on Mobile Safari, Android Chrome, and iFrame previews)
+  // Direct Download PDF File (Works 100% on Laptop and Mobile)
   const handleDownloadPDF = async (): Promise<Blob | null> => {
     setIsGeneratingPDF(true);
     showToast('Preparing official PDF receipt document...');
+
+    // If on mobile and currently viewing editor, switch to preview tab so #receipt-paper is visible
+    const wasEditorTab = activeTab === 'editor';
+    if (wasEditorTab) {
+      setActiveTab('preview');
+      await new Promise((r) => setTimeout(r, 250));
+    }
 
     const sourceElement = document.getElementById('receipt-paper');
     if (!sourceElement) {
@@ -269,27 +276,6 @@ export default function App() {
     const safeOrderNum = (orderNumber || 'JD-2026-1001').replace(/[^a-zA-Z0-9_-]/g, '_');
     const fileName = `Josella_Dolls_Receipt_${safeOrderNum}.pdf`;
 
-    // Create a visible off-screen rendering container with fixed A4 width (794px)
-    const renderContainer = document.createElement('div');
-    renderContainer.style.position = 'fixed';
-    renderContainer.style.top = '0';
-    renderContainer.style.left = '0';
-    renderContainer.style.width = '794px';
-    renderContainer.style.opacity = '0.01';
-    renderContainer.style.pointerEvents = 'none';
-    renderContainer.style.zIndex = '99999';
-    renderContainer.style.backgroundColor = '#ffffff';
-
-    const clone = sourceElement.cloneNode(true) as HTMLElement;
-    clone.id = 'receipt-paper-render-clone';
-    clone.style.width = '794px';
-    clone.style.maxWidth = 'none';
-    clone.style.display = 'block';
-    clone.style.visibility = 'visible';
-
-    renderContainer.appendChild(clone);
-    document.body.appendChild(renderContainer);
-
     try {
       if (document.fonts) {
         try {
@@ -299,17 +285,16 @@ export default function App() {
         }
       }
 
-      // Render clone to canvas with html2canvas directly
-      const canvas = await html2canvas(clone, {
+      // Render live receipt-paper element directly to canvas (prevents transparency crash)
+      const canvas = await html2canvas(sourceElement, {
         scale: 2,
         useCORS: true,
         allowTaint: false,
         logging: false,
-        backgroundColor: '#ffffff',
-        windowWidth: 800
+        backgroundColor: '#ffffff'
       });
 
-      // Convert canvas to image JPEG
+      // Convert canvas to JPEG image
       const imgData = canvas.toDataURL('image/jpeg', 0.98);
 
       // Create jsPDF document
@@ -319,11 +304,18 @@ export default function App() {
 
       pdf.addImage(imgData, 'JPEG', 0, 0, pdfWidth, pdfHeight);
 
-      // Create Blob and File objects
+      // Generate Blob and Blob URL
       const pdfBlob = pdf.output('blob');
       const blobUrl = URL.createObjectURL(pdfBlob);
 
-      // Trigger automatic background download link
+      // Trigger direct jsPDF file save
+      try {
+        pdf.save(fileName);
+      } catch (saveErr) {
+        console.warn('pdf.save call error:', saveErr);
+      }
+
+      // Trigger programmatic anchor download click
       const link = document.createElement('a');
       link.href = blobUrl;
       link.download = fileName;
@@ -335,14 +327,7 @@ export default function App() {
         if (link.parentNode) link.parentNode.removeChild(link);
       }, 3000);
 
-      // Also trigger jsPDF save
-      try {
-        pdf.save(fileName);
-      } catch (sErr) {
-        console.warn('pdf.save warning:', sErr);
-      }
-
-      // Display interactive modal on screen so user has direct clickable links
+      // Display interactive modal on screen so user has direct clickable view/download links
       setPdfReadyModal({
         open: true,
         pdfUrl: blobUrl,
@@ -354,11 +339,11 @@ export default function App() {
       return pdfBlob;
     } catch (err) {
       console.error('PDF Generation Error:', err);
-      showToast(`Generated ${fileName}`);
+      showToast('Error generating PDF. Please try again.');
       return null;
     } finally {
-      if (renderContainer.parentNode) {
-        renderContainer.parentNode.removeChild(renderContainer);
+      if (wasEditorTab) {
+        setTimeout(() => setActiveTab('editor'), 600);
       }
       setIsGeneratingPDF(false);
     }
