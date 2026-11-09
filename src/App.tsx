@@ -273,13 +273,6 @@ export default function App() {
     setIsGeneratingPDF(true);
     showToast('Preparing official PDF receipt document...');
 
-    // If on mobile editor tab, switch to preview tab so #receipt-paper is visible in DOM layout
-    const wasEditorTab = activeTab === 'editor';
-    if (wasEditorTab) {
-      setActiveTab('preview');
-      await new Promise((r) => setTimeout(r, 150));
-    }
-
     const sourceElement = document.getElementById('receipt-paper');
     if (!sourceElement) {
       setIsGeneratingPDF(false);
@@ -289,6 +282,37 @@ export default function App() {
 
     const safeOrderNum = (orderNumber || 'JD-2026-1001').replace(/[^a-zA-Z0-9_-]/g, '_');
     const fileName = `Josella_Dolls_Receipt_${safeOrderNum}.pdf`;
+
+    // Create a temporary 800px container positioned at document origin (0,0) with opacity 0.01
+    // (Guarantees 100% full-page A4 aspect ratio fit on mobile devices with zero bottom truncation)
+    const wrapper = document.createElement('div');
+    wrapper.style.position = 'absolute';
+    wrapper.style.left = '0';
+    wrapper.style.top = '0';
+    wrapper.style.width = '800px';
+    wrapper.style.backgroundColor = '#ffffff';
+    wrapper.style.zIndex = '-9999';
+    wrapper.style.opacity = '0.01';
+    wrapper.style.pointerEvents = 'none';
+
+    const clone = sourceElement.cloneNode(true) as HTMLElement;
+    clone.style.width = '800px';
+    clone.style.margin = '0';
+    clone.style.padding = '32px';
+    clone.style.boxSizing = 'border-box';
+    clone.style.backgroundColor = '#ffffff';
+
+    // Ensure all tables inside clone are full width
+    clone.querySelectorAll('table').forEach((t) => {
+      (t as HTMLElement).style.width = '100%';
+      (t as HTMLElement).style.minWidth = '0';
+    });
+
+    // Remove no-print elements from clone
+    clone.querySelectorAll('.no-print').forEach((el) => el.remove());
+
+    wrapper.appendChild(clone);
+    document.body.appendChild(wrapper);
 
     try {
       if (document.fonts) {
@@ -301,28 +325,27 @@ export default function App() {
 
       let imgData = '';
 
-      // Render live receipt preview element directly
       try {
-        imgData = await toPng(sourceElement, {
+        imgData = await toPng(clone, {
           quality: 0.98,
           pixelRatio: 2,
           backgroundColor: '#ffffff',
-          skipFonts: true,
-          filter: (node: any) => {
-            return !(node.classList && node.classList.contains('no-print'));
-          }
+          skipFonts: true
         });
       } catch (err1) {
-        console.warn('toPng direct render warning, using html2canvas fallback:', err1);
-        const canvas = await html2canvas(sourceElement, {
+        console.warn('Primary clone toPng warning, using html2canvas fallback:', err1);
+        const canvas = await html2canvas(clone, {
           scale: 2,
           useCORS: true,
           allowTaint: false,
           logging: false,
-          backgroundColor: '#ffffff',
-          ignoreElements: (el) => Boolean(el.classList && el.classList.contains('no-print'))
+          backgroundColor: '#ffffff'
         });
         imgData = canvas.toDataURL('image/jpeg', 0.98);
+      } finally {
+        if (wrapper.parentNode) {
+          wrapper.parentNode.removeChild(wrapper);
+        }
       }
 
       if (!imgData) {
@@ -366,6 +389,9 @@ export default function App() {
       showToast(`Receipt PDF ${fileName} ready!`);
       return pdfBlob;
     } catch (err: any) {
+      if (wrapper.parentNode) {
+        wrapper.parentNode.removeChild(wrapper);
+      }
       console.error('PDF Generation Error:', err);
       showToast('Error generating PDF. Please try again.');
       return null;
