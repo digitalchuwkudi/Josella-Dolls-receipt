@@ -321,16 +321,12 @@ export default function App() {
     }
   };
 
-  // Direct Download PDF File directly from visible DOM clone (Works 100% on Mobile & Laptop)
+  // Direct Download PDF File forcing direct browser download behavior via anchor element
   const handleDownloadPDF = async (): Promise<Blob | null> => {
+    if (isGeneratingPDF) return null;
     handleSaveToHistory();
     setIsGeneratingPDF(true);
-    showToast('Downloading official PDF receipt...');
-
-    // Instantly reset generating flag after 300ms so button never locks
-    setTimeout(() => {
-      setIsGeneratingPDF(false);
-    }, 300);
+    showToast('Generating official PDF receipt document...');
 
     const originalElement = document.getElementById('receipt-paper');
     if (!originalElement) {
@@ -342,22 +338,24 @@ export default function App() {
     const safeOrderNum = (orderNumber || 'JD-2026-1001').replace(/[^a-zA-Z0-9_-]/g, '_');
     const fileName = `Josella_Dolls_Receipt_${safeOrderNum}.pdf`;
 
-    // 1. Create a temporary container for full-resolution offscreen capture
+    // 1. Create temporary offscreen container for full-resolution A4 capture
     const tempContainer = document.createElement('div');
     tempContainer.style.position = 'fixed';
     tempContainer.style.top = '0';
-    tempContainer.style.left = '-9999px';
-    tempContainer.style.width = '794px'; // Standard A4 pixel width at 96 DPI
+    tempContainer.style.left = '0';
+    tempContainer.style.width = '794px';
     tempContainer.style.backgroundColor = '#ffffff';
-    tempContainer.style.zIndex = '99999';
+    tempContainer.style.zIndex = '-999';
+    tempContainer.style.opacity = '0.99';
+    tempContainer.style.pointerEvents = 'none';
 
-    // 2. Clone the original receipt element and ensure full width & display
+    // 2. Clone original receipt element ensuring full width & visibility
     const clone = originalElement.cloneNode(true) as HTMLElement;
     clone.removeAttribute('id');
     clone.style.width = '794px';
     clone.style.maxWidth = 'none';
     clone.style.minWidth = '794px';
-    clone.style.display = 'block'; // Ensure it is explicitly visible for html2canvas
+    clone.style.display = 'block';
     clone.style.boxSizing = 'border-box';
 
     tempContainer.appendChild(clone);
@@ -373,7 +371,11 @@ export default function App() {
         allowTaint: false,
         logging: false,
         backgroundColor: '#ffffff',
-        windowWidth: 794
+        windowWidth: 794,
+        x: 0,
+        y: 0,
+        scrollX: 0,
+        scrollY: 0
       },
       jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' as const }
     };
@@ -387,40 +389,54 @@ export default function App() {
         }
       }
 
-      // Generate PDF from cloned 794px container
+      // Generate jsPDF instance from cloned receipt element
       const pdfWorker = html2pdf().set(opt).from(clone).toPdf();
       const pdf = await pdfWorker.get('pdf');
-      
-      // Save directly using jsPDF engine
-      pdf.save(fileName);
 
-      // Trigger direct anchor download as secondary direct backup
+      // Output PDF as Blob and wrap with application/octet-stream for forced binary download
+      const pdfRawBlob: Blob = pdf.output('blob');
+      if (!pdfRawBlob || pdfRawBlob.size === 0) {
+        throw new Error('Generated PDF Blob is empty.');
+      }
+
+      const octetBlob = new Blob([pdfRawBlob], { type: 'application/octet-stream' });
+      const blobUrl = URL.createObjectURL(octetBlob);
+
+      // Create standard anchor tag to force direct browser download without 'Save As' prompt
+      const downloadLink = document.createElement('a');
+      downloadLink.href = blobUrl;
+      downloadLink.download = fileName;
+      downloadLink.setAttribute('download', fileName);
+      downloadLink.setAttribute('target', '_self');
+      downloadLink.style.display = 'none';
+      document.body.appendChild(downloadLink);
+
+      // Force immediate click event trigger
+      downloadLink.click();
+
+      // Clean up anchor tag element and revoke Blob URL
+      setTimeout(() => {
+        if (downloadLink.parentNode) {
+          downloadLink.parentNode.removeChild(downloadLink);
+        }
+        URL.revokeObjectURL(blobUrl);
+      }, 2500);
+
+      // Fallback jsPDF save trigger for desktop browsers
       try {
-        const blob = pdf.output('blob');
-        const octetBlob = new Blob([blob], { type: 'application/octet-stream' });
-        const blobUrl = URL.createObjectURL(octetBlob);
-        const a = document.createElement('a');
-        a.href = blobUrl;
-        a.download = fileName;
-        a.style.display = 'none';
-        document.body.appendChild(a);
-        a.click();
-        setTimeout(() => {
-          if (a.parentNode) a.parentNode.removeChild(a);
-          URL.revokeObjectURL(blobUrl);
-        }, 3000);
-      } catch (blobErr) {
-        console.warn('Blob fallback warning:', blobErr);
+        pdf.save(fileName);
+      } catch (saveErr) {
+        console.warn('jsPDF save fallback note:', saveErr);
       }
 
       showToast(`PDF Receipt ${fileName} downloaded!`);
-      return null;
+      return octetBlob;
     } catch (err) {
       console.error('PDF Generation Error:', err);
-      showToast(`PDF Receipt ${fileName} downloaded!`);
+      showToast('Could not generate PDF. Please try again.');
       return null;
     } finally {
-      // Clean up temporary container
+      // Clean up temporary container and reset generation state
       if (tempContainer.parentNode) {
         tempContainer.parentNode.removeChild(tempContainer);
       }
@@ -621,10 +637,11 @@ export default function App() {
 
               <button
                 onClick={handleDownloadPDF}
-                className="flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-bold text-white bg-pink-700 hover:bg-pink-800 active:bg-pink-900 rounded-lg shadow-sm transition-all whitespace-nowrap cursor-pointer"
+                disabled={isGeneratingPDF}
+                className="flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-bold text-white bg-pink-700 hover:bg-pink-800 active:bg-pink-900 rounded-lg shadow-sm transition-all whitespace-nowrap cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 <FileDown className="w-4 h-4" />
-                Download PDF
+                {isGeneratingPDF ? 'Generating PDF...' : 'Download PDF'}
               </button>
 
               <button
@@ -1086,10 +1103,11 @@ export default function App() {
               <div className="flex items-center gap-2">
                 <button
                   onClick={handleDownloadPDF}
-                  className="px-3.5 py-1.5 text-xs font-bold bg-pink-600 hover:bg-pink-700 active:bg-pink-800 text-white rounded-lg transition-colors flex items-center gap-1.5 shadow-2xs cursor-pointer"
+                  disabled={isGeneratingPDF}
+                  className="px-3.5 py-1.5 text-xs font-bold bg-pink-600 hover:bg-pink-700 active:bg-pink-800 text-white rounded-lg transition-colors flex items-center gap-1.5 shadow-2xs cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   <FileDown className="w-3.5 h-3.5" />
-                  Download PDF
+                  {isGeneratingPDF ? 'Generating PDF...' : 'Download PDF'}
                 </button>
               </div>
             </div>
@@ -1374,10 +1392,11 @@ export default function App() {
 
         <button
           onClick={handleDownloadPDF}
-          className="flex-1 py-2.5 px-3 text-xs font-bold text-white bg-pink-700 active:bg-pink-800 rounded-xl shadow-xs flex items-center justify-center gap-1.5 whitespace-nowrap cursor-pointer"
+          disabled={isGeneratingPDF}
+          className="flex-1 py-2.5 px-3 text-xs font-bold text-white bg-pink-700 active:bg-pink-800 rounded-xl shadow-xs flex items-center justify-center gap-1.5 whitespace-nowrap cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
         >
           <FileDown className="w-4 h-4" />
-          <span>Download PDF</span>
+          <span>{isGeneratingPDF ? 'Generating PDF...' : 'Download PDF'}</span>
         </button>
 
         <button
@@ -1459,7 +1478,8 @@ export default function App() {
                   setShareModalOpen(false);
                   await handleDownloadPDF();
                 }}
-                className="w-full p-3 rounded-xl border border-slate-200 bg-slate-50 hover:bg-slate-100 transition-all flex items-center justify-between group text-left"
+                disabled={isGeneratingPDF}
+                className="w-full p-3 rounded-xl border border-slate-200 bg-slate-50 hover:bg-slate-100 transition-all flex items-center justify-between group text-left disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 <div className="flex items-center gap-3">
                   <div className="w-9 h-9 rounded-full bg-slate-800 flex items-center justify-center text-white shrink-0">
