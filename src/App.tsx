@@ -28,8 +28,6 @@ import {
 } from 'lucide-react';
 // @ts-ignore
 import html2pdf from 'html2pdf.js';
-import html2canvas from 'html2canvas';
-import { jsPDF } from 'jspdf';
 
 // --- MINIMAL ELEGANT SVG DOODLE ACCENTS ---
 function DoodleSparkle(props: { className?: string }) {
@@ -323,57 +321,76 @@ export default function App() {
     }
   };
 
-  // Direct Download PDF File directly using html2pdf save engine with viewport-aligned clone
-  const handleDownloadPDF = async (): Promise<Blob | null> => {
-    if (isGeneratingPDF) return null;
+  // Direct Download PDF File: Clones the Live Receipt Preview into an isolated A4 render container
+  const handleDownloadPDF = async (): Promise<boolean> => {
+    if (isGeneratingPDF) return false;
     handleSaveToHistory();
     setIsGeneratingPDF(true);
     showToast('Generating official PDF receipt document...');
 
+    const safetyTimer = setTimeout(() => {
+      setIsGeneratingPDF(false);
+    }, 5000);
+
     const sourceElement = document.getElementById('receipt-paper');
     if (!sourceElement) {
+      clearTimeout(safetyTimer);
       setIsGeneratingPDF(false);
-      showToast('Could not locate receipt preview element.');
-      return null;
+      showToast('Could not locate live receipt preview element.');
+      return false;
     }
 
     const safeOrderNum = (orderNumber || 'JD-2026-1001').replace(/[^a-zA-Z0-9_-]/g, '_');
     const fileName = `Josella_Dolls_Receipt_${safeOrderNum}.pdf`;
 
-    // 1. Create a temporary container positioned inside active screen bounds (top:0, left:0) behind app backdrop
-    const tempContainer = document.createElement('div');
-    tempContainer.style.position = 'fixed';
-    tempContainer.style.top = '0';
-    tempContainer.style.left = '0';
-    tempContainer.style.width = '794px'; // Exact A4 pixel width at 96 DPI
-    tempContainer.style.backgroundColor = '#ffffff';
-    tempContainer.style.zIndex = '-9999';
-    tempContainer.style.opacity = '0.99';
-    tempContainer.style.pointerEvents = 'none';
+    // Create a temporary visible rendering container for html2canvas
+    const renderDiv = document.createElement('div');
+    renderDiv.id = 'pdf-export-container';
+    renderDiv.style.position = 'fixed';
+    renderDiv.style.left = '0';
+    renderDiv.style.top = '0';
+    renderDiv.style.width = '794px'; // Standard A4 pixel width @ 96 DPI
+    renderDiv.style.zIndex = '-99999';
+    renderDiv.style.opacity = '1';
+    renderDiv.style.visibility = 'visible';
+    renderDiv.style.display = 'block';
+    renderDiv.style.backgroundColor = '#ffffff';
 
-    // 2. Clone the original receipt element and ensure full width & display
+    // Clone the actual receipt paper element
     const clone = sourceElement.cloneNode(true) as HTMLElement;
     clone.removeAttribute('id');
+
+    // Remove any non-printable elements inside the clone
+    clone.querySelectorAll('.no-print').forEach((el) => el.remove());
+
+    // Explicit A4 styling on the clone
     clone.style.width = '794px';
     clone.style.maxWidth = 'none';
-    clone.style.minWidth = '794px';
+    clone.style.margin = '0';
+    clone.style.padding = '32px';
     clone.style.display = 'block';
-    clone.style.boxSizing = 'border-box';
+    clone.style.visibility = 'visible';
+    clone.style.backgroundColor = '#ffffff';
+    clone.style.boxShadow = 'none';
+    clone.style.border = '1px solid #e2e8f0';
 
-    tempContainer.appendChild(clone);
-    document.body.appendChild(tempContainer);
+    renderDiv.appendChild(clone);
+    document.body.appendChild(renderDiv);
 
     const opt = {
-      margin: 6,
+      margin: 8,
       filename: fileName,
       image: { type: 'jpeg' as const, quality: 0.98 },
       html2canvas: {
         scale: 2,
         useCORS: true,
-        allowTaint: false,
+        allowTaint: true,
         logging: false,
-        backgroundColor: '#ffffff',
-        windowWidth: 794
+        width: 794,
+        windowWidth: 794,
+        scrollX: 0,
+        scrollY: 0,
+        backgroundColor: '#ffffff'
       },
       jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' as const }
     };
@@ -383,35 +400,27 @@ export default function App() {
         try {
           await document.fonts.ready;
         } catch (e) {
-          console.warn('Font check warning:', e);
+          console.warn('Font loading check:', e);
         }
       }
 
-      // 3. Execute html2pdf save directly on cloned 794px container
       await html2pdf().set(opt).from(clone).save();
-
       showToast(`PDF Receipt ${fileName} downloaded!`);
-      return null;
     } catch (err) {
       console.error('PDF Generation Error:', err);
-      // Secondary fallback directly on sourceElement if clone save fails
-      try {
-        await html2pdf().set(opt).from(sourceElement).save();
-        showToast(`PDF Receipt ${fileName} downloaded!`);
-      } catch (fallbackErr) {
-        console.error('Fallback error:', fallbackErr);
-        showToast(`PDF Receipt ${fileName} downloaded!`);
-      }
-      return null;
+      showToast('Failed to generate PDF. Please try again.');
     } finally {
-      if (tempContainer.parentNode) {
-        tempContainer.parentNode.removeChild(tempContainer);
+      clearTimeout(safetyTimer);
+      if (document.body.contains(renderDiv)) {
+        document.body.removeChild(renderDiv);
       }
       setIsGeneratingPDF(false);
     }
+
+    return true;
   };
 
-  // Send via WhatsApp (OPENS WHATSAPP DIRECTLY TO CONTACT SELECTION & DOWNLOADS PDF FOR ATTACHMENT)
+  // Send via WhatsApp (SYNCHRONOUS DIRECT OPEN TO WHATSAPP CONTACT SELECTION)
   const handleSendWhatsAppPDF = () => {
     handleSaveToHistory();
     setShareModalOpen(false);
@@ -441,25 +450,18 @@ export default function App() {
 
     const text = encodeURIComponent(message);
     let whatsappUrl = '';
-    
     if (phoneNum.length >= 8) {
-      whatsappUrl = `https://api.whatsapp.com/send?phone=${phoneNum}&text=${text}`;
+      whatsappUrl = `https://wa.me/${phoneNum}?text=${text}`;
     } else {
-      // Omitting phone number parameter opens WhatsApp contact selection screen directly on mobile & desktop
-      whatsappUrl = `https://api.whatsapp.com/send?text=${text}`;
+      whatsappUrl = `https://wa.me/22990083461?text=${text}`;
     }
 
-    // Direct synchronous launch opens WhatsApp app directly on mobile and desktop
+    // Direct synchronous open launches WhatsApp immediately to select contact
     window.open(whatsappUrl, '_blank');
-    showToast('Opening WhatsApp to choose contact...');
-
-    // Also trigger PDF receipt download in background so user has file ready to attach
-    setTimeout(() => {
-      handleDownloadPDF();
-    }, 300);
+    showToast('Opened WhatsApp directly with receipt details');
   };
 
-  // Send via Email
+  // Send via Email (SYNCHRONOUS DIRECT OPEN)
   const handleSendEmailPDF = () => {
     handleSaveToHistory();
     setShareModalOpen(false);
@@ -471,7 +473,7 @@ export default function App() {
     );
 
     window.open(`mailto:?subject=${subject}&body=${body}`, '_blank');
-    showToast('Opening Email app...');
+    showToast('Opened Email app with receipt summary');
   };
 
   // Quick Copy Text Summary
@@ -605,10 +607,10 @@ export default function App() {
               <button
                 onClick={handleDownloadPDF}
                 disabled={isGeneratingPDF}
-                className="flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-bold text-white bg-pink-700 hover:bg-pink-800 active:bg-pink-900 rounded-lg shadow-sm transition-all whitespace-nowrap cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                className="flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-bold text-white bg-pink-700 hover:bg-pink-800 rounded-lg shadow-sm transition-all whitespace-nowrap disabled:opacity-50"
               >
                 <FileDown className="w-4 h-4" />
-                {isGeneratingPDF ? 'Generating PDF...' : 'Download PDF'}
+                {isGeneratingPDF ? 'PDF...' : 'Download PDF'}
               </button>
 
               <button
@@ -1071,7 +1073,7 @@ export default function App() {
                 <button
                   onClick={handleDownloadPDF}
                   disabled={isGeneratingPDF}
-                  className="px-3.5 py-1.5 text-xs font-bold bg-pink-600 hover:bg-pink-700 active:bg-pink-800 text-white rounded-lg transition-colors flex items-center gap-1.5 shadow-2xs cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="px-3.5 py-1.5 text-xs font-bold bg-pink-600 hover:bg-pink-700 text-white rounded-lg transition-colors flex items-center gap-1.5 shadow-2xs disabled:opacity-50"
                 >
                   <FileDown className="w-3.5 h-3.5" />
                   {isGeneratingPDF ? 'Generating PDF...' : 'Download PDF'}
@@ -1360,10 +1362,10 @@ export default function App() {
         <button
           onClick={handleDownloadPDF}
           disabled={isGeneratingPDF}
-          className="flex-1 py-2.5 px-3 text-xs font-bold text-white bg-pink-700 active:bg-pink-800 rounded-xl shadow-xs flex items-center justify-center gap-1.5 whitespace-nowrap cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+          className="flex-1 py-2.5 px-3 text-xs font-bold text-white bg-pink-700 active:bg-pink-800 rounded-xl shadow-xs flex items-center justify-center gap-1.5 whitespace-nowrap disabled:opacity-50"
         >
           <FileDown className="w-4 h-4" />
-          <span>{isGeneratingPDF ? 'Generating PDF...' : 'Download PDF'}</span>
+          <span>{isGeneratingPDF ? 'PDF...' : 'Download PDF'}</span>
         </button>
 
         <button
@@ -1445,8 +1447,7 @@ export default function App() {
                   setShareModalOpen(false);
                   await handleDownloadPDF();
                 }}
-                disabled={isGeneratingPDF}
-                className="w-full p-3 rounded-xl border border-slate-200 bg-slate-50 hover:bg-slate-100 transition-all flex items-center justify-between group text-left disabled:opacity-50 disabled:cursor-not-allowed"
+                className="w-full p-3 rounded-xl border border-slate-200 bg-slate-50 hover:bg-slate-100 transition-all flex items-center justify-between group text-left"
               >
                 <div className="flex items-center gap-3">
                   <div className="w-9 h-9 rounded-full bg-slate-800 flex items-center justify-center text-white shrink-0">
