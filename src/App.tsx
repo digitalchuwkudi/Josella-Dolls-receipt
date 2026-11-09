@@ -428,15 +428,9 @@ export default function App() {
     message += `Thank you for shopping with Josella Dolls!`;
 
     const text = encodeURIComponent(message);
-    let whatsappUrl = '';
-    
-    if (phoneNum.length >= 8) {
-      whatsappUrl = `https://api.whatsapp.com/send?phone=${phoneNum}&text=${text}`;
-    } else {
-      whatsappUrl = `https://api.whatsapp.com/send?text=${text}`;
-    }
+    const whatsappUrl = `https://api.whatsapp.com/send?text=${text}`;
 
-    // Direct synchronous launch opens WhatsApp app directly on mobile and desktop
+    // Direct synchronous launch opens WhatsApp app directly to contact selection on mobile and desktop
     window.open(whatsappUrl, '_blank');
     showToast('Opening WhatsApp to choose contact...');
 
