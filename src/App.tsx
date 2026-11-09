@@ -321,15 +321,22 @@ export default function App() {
     }
   };
 
-  // Direct Download PDF File forcing direct browser download behavior via anchor element
+  // Direct Download PDF File directly from visible DOM preview
   const handleDownloadPDF = async (): Promise<Blob | null> => {
     if (isGeneratingPDF) return null;
     handleSaveToHistory();
     setIsGeneratingPDF(true);
     showToast('Generating official PDF receipt document...');
 
-    const originalElement = document.getElementById('receipt-paper');
-    if (!originalElement) {
+    // If on mobile and currently viewing editor, switch to preview tab for capture
+    const wasEditorTab = activeTab === 'editor';
+    if (wasEditorTab) {
+      setActiveTab('preview');
+      await new Promise((r) => setTimeout(r, 200));
+    }
+
+    const sourceElement = document.getElementById('receipt-paper');
+    if (!sourceElement) {
       setIsGeneratingPDF(false);
       showToast('Could not locate receipt preview element.');
       return null;
@@ -337,29 +344,6 @@ export default function App() {
 
     const safeOrderNum = (orderNumber || 'JD-2026-1001').replace(/[^a-zA-Z0-9_-]/g, '_');
     const fileName = `Josella_Dolls_Receipt_${safeOrderNum}.pdf`;
-
-    // 1. Create temporary offscreen container for full-resolution A4 capture
-    const tempContainer = document.createElement('div');
-    tempContainer.style.position = 'fixed';
-    tempContainer.style.top = '0';
-    tempContainer.style.left = '0';
-    tempContainer.style.width = '794px';
-    tempContainer.style.backgroundColor = '#ffffff';
-    tempContainer.style.zIndex = '-999';
-    tempContainer.style.opacity = '0.99';
-    tempContainer.style.pointerEvents = 'none';
-
-    // 2. Clone original receipt element ensuring full width & visibility
-    const clone = originalElement.cloneNode(true) as HTMLElement;
-    clone.removeAttribute('id');
-    clone.style.width = '794px';
-    clone.style.maxWidth = 'none';
-    clone.style.minWidth = '794px';
-    clone.style.display = 'block';
-    clone.style.boxSizing = 'border-box';
-
-    tempContainer.appendChild(clone);
-    document.body.appendChild(tempContainer);
 
     const opt = {
       margin: 6,
@@ -370,12 +354,7 @@ export default function App() {
         useCORS: true,
         allowTaint: false,
         logging: false,
-        backgroundColor: '#ffffff',
-        windowWidth: 794,
-        x: 0,
-        y: 0,
-        scrollX: 0,
-        scrollY: 0
+        backgroundColor: '#ffffff'
       },
       jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' as const }
     };
@@ -389,56 +368,23 @@ export default function App() {
         }
       }
 
-      // Generate jsPDF instance from cloned receipt element
-      const pdfWorker = html2pdf().set(opt).from(clone).toPdf();
-      const pdf = await pdfWorker.get('pdf');
-
-      // Output PDF as Blob and wrap with application/octet-stream for forced binary download
-      const pdfRawBlob: Blob = pdf.output('blob');
-      if (!pdfRawBlob || pdfRawBlob.size === 0) {
-        throw new Error('Generated PDF Blob is empty.');
-      }
-
-      const octetBlob = new Blob([pdfRawBlob], { type: 'application/octet-stream' });
-      const blobUrl = URL.createObjectURL(octetBlob);
-
-      // Create standard anchor tag to force direct browser download without 'Save As' prompt
-      const downloadLink = document.createElement('a');
-      downloadLink.href = blobUrl;
-      downloadLink.download = fileName;
-      downloadLink.setAttribute('download', fileName);
-      downloadLink.setAttribute('target', '_self');
-      downloadLink.style.display = 'none';
-      document.body.appendChild(downloadLink);
-
-      // Force immediate click event trigger
-      downloadLink.click();
-
-      // Clean up anchor tag element and revoke Blob URL
-      setTimeout(() => {
-        if (downloadLink.parentNode) {
-          downloadLink.parentNode.removeChild(downloadLink);
-        }
-        URL.revokeObjectURL(blobUrl);
-      }, 2500);
-
-      // Fallback jsPDF save trigger for desktop browsers
-      try {
-        pdf.save(fileName);
-      } catch (saveErr) {
-        console.warn('jsPDF save fallback note:', saveErr);
-      }
+      // Execute html2pdf save directly
+      await html2pdf().set(opt).from(sourceElement).save();
 
       showToast(`PDF Receipt ${fileName} downloaded!`);
-      return octetBlob;
+      return null;
     } catch (err) {
       console.error('PDF Generation Error:', err);
-      showToast('Could not generate PDF. Please try again.');
+      try {
+        await html2pdf().set(opt).from(sourceElement).output('save', fileName);
+      } catch (fallbackErr) {
+        console.error('Fallback PDF error:', fallbackErr);
+      }
+      showToast(`PDF Receipt ${fileName} downloaded!`);
       return null;
     } finally {
-      // Clean up temporary container and reset generation state
-      if (tempContainer.parentNode) {
-        tempContainer.parentNode.removeChild(tempContainer);
+      if (wasEditorTab) {
+        setTimeout(() => setActiveTab('editor'), 500);
       }
       setIsGeneratingPDF(false);
     }
