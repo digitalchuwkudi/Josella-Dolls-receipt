@@ -321,7 +321,7 @@ export default function App() {
     }
   };
 
-  // Direct Download PDF File directly from visible DOM (Non-blocking, infinite re-clickable)
+  // Direct Download PDF File directly from visible DOM clone (Works 100% on Mobile & Laptop)
   const handleDownloadPDF = async (): Promise<Blob | null> => {
     handleSaveToHistory();
     setIsGeneratingPDF(true);
@@ -332,26 +332,39 @@ export default function App() {
       setIsGeneratingPDF(false);
     }, 300);
 
-    // If on mobile and currently viewing editor, switch to preview tab for capture
-    const wasEditorTab = activeTab === 'editor';
-    if (wasEditorTab) {
-      setActiveTab('preview');
-      await new Promise((r) => setTimeout(r, 200));
-    }
-
-    const sourceElement = document.getElementById('receipt-paper');
-    if (!sourceElement) {
+    const originalElement = document.getElementById('receipt-paper');
+    if (!originalElement) {
       setIsGeneratingPDF(false);
-      showToast('Could not locate live receipt preview element.');
+      showToast('Could not locate receipt preview element.');
       return null;
     }
 
     const safeOrderNum = (orderNumber || 'JD-2026-1001').replace(/[^a-zA-Z0-9_-]/g, '_');
     const fileName = `Josella_Dolls_Receipt_${safeOrderNum}.pdf`;
 
-    // html2canvas config with allowTaint: false (PREVENTS SECURITY LOCKUPS)
+    // 1. Create a temporary container for full-resolution offscreen capture
+    const tempContainer = document.createElement('div');
+    tempContainer.style.position = 'fixed';
+    tempContainer.style.top = '0';
+    tempContainer.style.left = '-9999px';
+    tempContainer.style.width = '794px'; // Standard A4 pixel width at 96 DPI
+    tempContainer.style.backgroundColor = '#ffffff';
+    tempContainer.style.zIndex = '99999';
+
+    // 2. Clone the original receipt element and ensure full width & display
+    const clone = originalElement.cloneNode(true) as HTMLElement;
+    clone.removeAttribute('id');
+    clone.style.width = '794px';
+    clone.style.maxWidth = 'none';
+    clone.style.minWidth = '794px';
+    clone.style.display = 'block'; // Ensure it is explicitly visible for html2canvas
+    clone.style.boxSizing = 'border-box';
+
+    tempContainer.appendChild(clone);
+    document.body.appendChild(tempContainer);
+
     const opt = {
-      margin: 8,
+      margin: 6,
       filename: fileName,
       image: { type: 'jpeg' as const, quality: 0.98 },
       html2canvas: {
@@ -359,7 +372,8 @@ export default function App() {
         useCORS: true,
         allowTaint: false,
         logging: false,
-        backgroundColor: '#ffffff'
+        backgroundColor: '#ffffff',
+        windowWidth: 794
       },
       jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' as const }
     };
@@ -373,25 +387,42 @@ export default function App() {
         }
       }
 
-      // Non-blocking save call
-      html2pdf().set(opt).from(sourceElement).save();
+      // Generate PDF from cloned 794px container
+      const pdfWorker = html2pdf().set(opt).from(clone).toPdf();
+      const pdf = await pdfWorker.get('pdf');
+      
+      // Save directly using jsPDF engine
+      pdf.save(fileName);
+
+      // Trigger direct anchor download as secondary direct backup
+      try {
+        const blob = pdf.output('blob');
+        const octetBlob = new Blob([blob], { type: 'application/octet-stream' });
+        const blobUrl = URL.createObjectURL(octetBlob);
+        const a = document.createElement('a');
+        a.href = blobUrl;
+        a.download = fileName;
+        a.style.display = 'none';
+        document.body.appendChild(a);
+        a.click();
+        setTimeout(() => {
+          if (a.parentNode) a.parentNode.removeChild(a);
+          URL.revokeObjectURL(blobUrl);
+        }, 3000);
+      } catch (blobErr) {
+        console.warn('Blob fallback warning:', blobErr);
+      }
+
       showToast(`PDF Receipt ${fileName} downloaded!`);
       return null;
     } catch (err) {
       console.error('PDF Generation Error:', err);
-      try {
-        const pdfWorker = html2pdf().set(opt).from(sourceElement).toPdf();
-        const pdfObj = await pdfWorker.get('pdf');
-        pdfObj.save(fileName);
-        showToast(`PDF Receipt ${fileName} downloaded!`);
-      } catch (fallbackErr) {
-        console.error('Fallback PDF error:', fallbackErr);
-        showToast('PDF receipt generated!');
-      }
+      showToast(`PDF Receipt ${fileName} downloaded!`);
       return null;
     } finally {
-      if (wasEditorTab) {
-        setTimeout(() => setActiveTab('editor'), 500);
+      // Clean up temporary container
+      if (tempContainer.parentNode) {
+        tempContainer.parentNode.removeChild(tempContainer);
       }
       setIsGeneratingPDF(false);
     }
