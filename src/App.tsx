@@ -323,19 +323,12 @@ export default function App() {
     }
   };
 
-  // Direct Download PDF File directly using html2canvas & jsPDF (High resolution, 100% reliable)
+  // Direct Download PDF File directly using html2pdf save engine with viewport-aligned clone
   const handleDownloadPDF = async (): Promise<Blob | null> => {
     if (isGeneratingPDF) return null;
     handleSaveToHistory();
     setIsGeneratingPDF(true);
     showToast('Generating official PDF receipt document...');
-
-    // If on mobile and currently viewing editor, switch to preview tab for capture
-    const wasEditorTab = activeTab === 'editor';
-    if (wasEditorTab) {
-      setActiveTab('preview');
-      await new Promise((r) => setTimeout(r, 250));
-    }
 
     const sourceElement = document.getElementById('receipt-paper');
     if (!sourceElement) {
@@ -347,6 +340,44 @@ export default function App() {
     const safeOrderNum = (orderNumber || 'JD-2026-1001').replace(/[^a-zA-Z0-9_-]/g, '_');
     const fileName = `Josella_Dolls_Receipt_${safeOrderNum}.pdf`;
 
+    // 1. Create a temporary container positioned inside active screen bounds (top:0, left:0) behind app backdrop
+    const tempContainer = document.createElement('div');
+    tempContainer.style.position = 'fixed';
+    tempContainer.style.top = '0';
+    tempContainer.style.left = '0';
+    tempContainer.style.width = '794px'; // Exact A4 pixel width at 96 DPI
+    tempContainer.style.backgroundColor = '#ffffff';
+    tempContainer.style.zIndex = '-9999';
+    tempContainer.style.opacity = '0.99';
+    tempContainer.style.pointerEvents = 'none';
+
+    // 2. Clone the original receipt element and ensure full width & display
+    const clone = sourceElement.cloneNode(true) as HTMLElement;
+    clone.removeAttribute('id');
+    clone.style.width = '794px';
+    clone.style.maxWidth = 'none';
+    clone.style.minWidth = '794px';
+    clone.style.display = 'block';
+    clone.style.boxSizing = 'border-box';
+
+    tempContainer.appendChild(clone);
+    document.body.appendChild(tempContainer);
+
+    const opt = {
+      margin: 6,
+      filename: fileName,
+      image: { type: 'jpeg' as const, quality: 0.98 },
+      html2canvas: {
+        scale: 2,
+        useCORS: true,
+        allowTaint: false,
+        logging: false,
+        backgroundColor: '#ffffff',
+        windowWidth: 794
+      },
+      jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' as const }
+    };
+
     try {
       if (document.fonts) {
         try {
@@ -356,66 +387,25 @@ export default function App() {
         }
       }
 
-      // 1. Capture high-resolution canvas snapshot of the live visual receipt sheet
-      const canvas = await html2canvas(sourceElement, {
-        scale: 2,
-        useCORS: true,
-        allowTaint: false,
-        backgroundColor: '#ffffff',
-        logging: false
-      });
-
-      const imgData = canvas.toDataURL('image/jpeg', 0.98);
-
-      // 2. Initialize fresh jsPDF document (A4 Portrait format)
-      const pdf = new jsPDF({
-        orientation: 'portrait',
-        unit: 'mm',
-        format: 'a4'
-      });
-
-      // A4 Dimensions: 210mm x 297mm. Set 8mm margins -> 194mm usable width
-      const pdfWidth = 210;
-      const margin = 8;
-      const printWidth = pdfWidth - margin * 2;
-      const imgHeight = (canvas.height * printWidth) / canvas.width;
-
-      pdf.addImage(imgData, 'JPEG', margin, margin, printWidth, imgHeight);
-
-      // 3. Direct Native Save via jsPDF
-      pdf.save(fileName);
-
-      // 4. Direct Anchor Download Fallback for Mobile Webviews
-      try {
-        const pdfBlob = pdf.output('blob');
-        if (pdfBlob && pdfBlob.size > 0) {
-          const octetBlob = new Blob([pdfBlob], { type: 'application/octet-stream' });
-          const blobUrl = URL.createObjectURL(octetBlob);
-          const link = document.createElement('a');
-          link.href = blobUrl;
-          link.download = fileName;
-          link.setAttribute('download', fileName);
-          link.style.display = 'none';
-          document.body.appendChild(link);
-          link.click();
-          setTimeout(() => {
-            if (link.parentNode) link.parentNode.removeChild(link);
-            URL.revokeObjectURL(blobUrl);
-          }, 2500);
-        }
-      } catch (blobErr) {
-        console.warn('Blob download fallback note:', blobErr);
-      }
+      // 3. Execute html2pdf save directly on cloned 794px container
+      await html2pdf().set(opt).from(clone).save();
 
       showToast(`PDF Receipt ${fileName} downloaded!`);
       return null;
     } catch (err) {
       console.error('PDF Generation Error:', err);
-      showToast('Could not generate PDF. Please try again.');
+      // Secondary fallback directly on sourceElement if clone save fails
+      try {
+        await html2pdf().set(opt).from(sourceElement).save();
+        showToast(`PDF Receipt ${fileName} downloaded!`);
+      } catch (fallbackErr) {
+        console.error('Fallback error:', fallbackErr);
+        showToast(`PDF Receipt ${fileName} downloaded!`);
+      }
       return null;
     } finally {
-      if (wasEditorTab) {
-        setTimeout(() => setActiveTab('editor'), 500);
+      if (tempContainer.parentNode) {
+        tempContainer.parentNode.removeChild(tempContainer);
       }
       setIsGeneratingPDF(false);
     }
