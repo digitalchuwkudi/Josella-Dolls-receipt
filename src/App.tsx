@@ -255,17 +255,23 @@ export default function App() {
     showToast('Created new blank receipt');
   };
 
+  // Synchronous lock to prevent mobile touch double-firing / ghost tap clicks
+  const downloadLockRef = React.useRef<number>(0);
+
   // Direct Download PDF File (Works 100% on Laptop and Mobile)
-  const handleDownloadPDF = async (): Promise<Blob | null> => {
+  const handleDownloadPDF = async (e?: React.SyntheticEvent): Promise<Blob | null> => {
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+    const now = Date.now();
+    if (now - downloadLockRef.current < 2500 || isGeneratingPDF) {
+      console.warn('PDF generation throttled to prevent duplicate tap/click on mobile.');
+      return null;
+    }
+    downloadLockRef.current = now;
     setIsGeneratingPDF(true);
     showToast('Preparing official PDF receipt document...');
-
-    // If on mobile editor tab, temporarily switch to preview tab so #receipt-paper is visible in DOM
-    const wasEditorTab = activeTab === 'editor';
-    if (wasEditorTab) {
-      setActiveTab('preview');
-      await new Promise((r) => setTimeout(r, 200));
-    }
 
     const sourceElement = document.getElementById('receipt-paper');
     if (!sourceElement) {
@@ -277,46 +283,75 @@ export default function App() {
     const safeOrderNum = (orderNumber || 'JD-2026-1001').replace(/[^a-zA-Z0-9_-]/g, '_');
     const fileName = `Josella_Dolls_Receipt_${safeOrderNum}.pdf`;
 
+    // Create a temporary 800px clone positioned at top-left origin (0,0) in document DOM space
+    // (This guarantees 100% complete capture of all receipt sections on mobile without clipping or blank pages)
+    const wrapper = document.createElement('div');
+    wrapper.style.position = 'absolute';
+    wrapper.style.left = '0';
+    wrapper.style.top = '0';
+    wrapper.style.width = '800px';
+    wrapper.style.backgroundColor = '#ffffff';
+    wrapper.style.zIndex = '-9999';
+    wrapper.style.pointerEvents = 'none';
+
+    const clone = sourceElement.cloneNode(true) as HTMLElement;
+    clone.style.width = '800px';
+    clone.style.margin = '0';
+    clone.style.padding = '32px';
+    clone.style.boxSizing = 'border-box';
+    clone.style.backgroundColor = '#ffffff';
+
+    // Ensure all tables inside clone are full width
+    clone.querySelectorAll('table').forEach((t) => {
+      (t as HTMLElement).style.width = '100%';
+      (t as HTMLElement).style.minWidth = '0';
+    });
+
+    // Remove no-print elements from clone
+    clone.querySelectorAll('.no-print').forEach((el) => el.remove());
+
+    wrapper.appendChild(clone);
+    document.body.appendChild(wrapper);
+
     try {
       if (document.fonts) {
         try {
           await document.fonts.ready;
-        } catch (e) {
-          console.warn('Font check warning:', e);
+        } catch (fontErr) {
+          console.warn('Font check warning:', fontErr);
         }
       }
 
       let imgData = '';
 
-      // Capture live visual preview element directly from DOM
       try {
-        imgData = await toPng(sourceElement, {
+        imgData = await toPng(clone, {
           quality: 0.98,
           pixelRatio: 2,
           backgroundColor: '#ffffff',
-          skipFonts: true,
-          filter: (node: any) => {
-            return !(node.classList && node.classList.contains('no-print'));
-          }
+          skipFonts: true
         });
       } catch (err1) {
-        console.warn('toPng direct capture warning, trying html2canvas fallback:', err1);
-        const canvas = await html2canvas(sourceElement, {
+        console.warn('Primary clone toPng warning, using html2canvas fallback:', err1);
+        const canvas = await html2canvas(clone, {
           scale: 2,
           useCORS: true,
           allowTaint: false,
           logging: false,
-          backgroundColor: '#ffffff',
-          ignoreElements: (el) => Boolean(el.classList && el.classList.contains('no-print'))
+          backgroundColor: '#ffffff'
         });
         imgData = canvas.toDataURL('image/jpeg', 0.98);
+      } finally {
+        if (wrapper.parentNode) {
+          wrapper.parentNode.removeChild(wrapper);
+        }
       }
 
       if (!imgData) {
         throw new Error('Could not render receipt image.');
       }
 
-      // Load image dimensions
+      // Load image properties
       const img = new Image();
       img.src = imgData;
       await new Promise((resolve) => {
@@ -335,14 +370,14 @@ export default function App() {
       const pdfBlob = pdf.output('blob');
       const blobUrl = URL.createObjectURL(pdfBlob);
 
-      // Trigger ONLY ONE direct file save
+      // Trigger EXACTLY ONE direct file save
       try {
         pdf.save(fileName);
       } catch (saveErr) {
         console.warn('pdf.save call warning:', saveErr);
       }
 
-      // Open interactive PDF Ready modal for direct access
+      // Open interactive PDF Ready modal
       setPdfReadyModal({
         open: true,
         pdfUrl: blobUrl,
@@ -353,6 +388,9 @@ export default function App() {
       showToast(`Receipt PDF ${fileName} ready!`);
       return pdfBlob;
     } catch (err: any) {
+      if (wrapper.parentNode) {
+        wrapper.parentNode.removeChild(wrapper);
+      }
       console.error('PDF Generation Error:', err);
       showToast('Opening PDF Print Document...');
 
@@ -492,7 +530,7 @@ export default function App() {
                   <DoodleSparkle className="w-3.5 h-3.5 text-pink-200 absolute -top-1 -right-1 opacity-80" />
                 </div>
                 <div className="min-w-0">
-                  <span className="text-base sm:text-xl font-bold tracking-tight text-slate-900 font-serif-luxury block leading-tight">
+                  <span className="text-base sm:text-xl font-bold tracking-tight text-slate-900 font-serif-luxury block leading-tight whitespace-nowrap">
                     Josella Dolls
                   </span>
                   <p className="hidden lg:block text-[10px] uppercase tracking-wider text-pink-700 font-semibold leading-tight mt-0.5">
@@ -520,6 +558,7 @@ export default function App() {
               </button>
 
               <button
+                type="button"
                 onClick={handleDownloadPDF}
                 className="flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-bold text-white bg-pink-700 hover:bg-pink-800 active:bg-pink-900 rounded-lg shadow-sm transition-all whitespace-nowrap cursor-pointer"
               >
@@ -985,6 +1024,7 @@ export default function App() {
 
               <div className="flex items-center gap-2">
                 <button
+                  type="button"
                   onClick={handleDownloadPDF}
                   className="px-3.5 py-1.5 text-xs font-bold bg-pink-600 hover:bg-pink-700 active:bg-pink-800 text-white rounded-lg transition-colors flex items-center gap-1.5 shadow-2xs cursor-pointer"
                 >
@@ -1020,7 +1060,7 @@ export default function App() {
                     <div>
                       <div className="relative inline-block">
                         <DoodleCrown className="w-6 h-4 text-pink-400 opacity-80 mb-0.5 block" />
-                        <h1 className="font-serif-luxury text-2xl sm:text-3xl font-bold tracking-tight text-slate-900 leading-tight">
+                        <h1 className="font-serif-luxury text-xl sm:text-3xl font-bold tracking-tight text-slate-900 leading-tight whitespace-nowrap">
                           Josella Dolls
                         </h1>
                         <DoodleWavyLine className="w-24 h-2 text-pink-300 opacity-60 block mt-0.5" />
@@ -1259,6 +1299,7 @@ export default function App() {
       {/* --- MOBILE & TABLET STICKY BOTTOM ACTION BAR (strictly < 1024px NO-PRINT) --- */}
       <div className="no-print fixed bottom-0 left-0 right-0 z-40 bg-white border-t border-slate-200 p-2.5 shadow-lg lg:hidden flex items-center justify-between gap-2">
         <button
+          type="button"
           onClick={handleDownloadPDF}
           className="flex-1 py-2.5 px-3 text-xs font-bold text-white bg-pink-700 active:bg-pink-800 rounded-xl shadow-xs flex items-center justify-center gap-1.5 whitespace-nowrap cursor-pointer"
         >
@@ -1341,9 +1382,11 @@ export default function App() {
 
               {/* Direct PDF Download */}
               <button
-                onClick={async () => {
+                type="button"
+                onClick={async (e) => {
+                  e.preventDefault();
                   setShareModalOpen(false);
-                  await handleDownloadPDF();
+                  await handleDownloadPDF(e);
                 }}
                 className="w-full p-3 rounded-xl border border-slate-200 bg-slate-50 hover:bg-slate-100 transition-all flex items-center justify-between group text-left"
               >
