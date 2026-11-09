@@ -176,6 +176,19 @@ export default function App() {
   const [stampStyle, setStampStyle] = useState<'classic' | 'modern' | 'minimal'>('classic');
   const [isGeneratingPDF, setIsGeneratingPDF] = useState<boolean>(false);
 
+  // PDF File Ready Modal State
+  const [pdfReadyModal, setPdfReadyModal] = useState<{
+    open: boolean;
+    pdfUrl: string;
+    pngUrl: string;
+    fileName: string;
+  }>({
+    open: false,
+    pdfUrl: '',
+    pngUrl: '',
+    fileName: ''
+  });
+
   // Show Toast Notification Helper
   const showToast = (msg: string) => {
     setToastMessage(msg);
@@ -257,7 +270,6 @@ export default function App() {
     const fileName = `Josella_Dolls_Receipt_${safeOrderNum}.pdf`;
 
     // Create a visible off-screen rendering container with fixed A4 width (794px)
-    // This guarantees html2canvas captures 100% of visual details on mobile regardless of active tab or screen width!
     const renderContainer = document.createElement('div');
     renderContainer.style.position = 'fixed';
     renderContainer.style.top = '0';
@@ -309,25 +321,9 @@ export default function App() {
 
       // Create Blob and File objects
       const pdfBlob = pdf.output('blob');
-      const pdfFile = new File([pdfBlob], fileName, { type: 'application/pdf' });
-
-      // 1. Try Mobile Web Share API first (iOS Safari & Android Chrome Native Share / Save to Files Sheet)
-      if (navigator.canShare && navigator.canShare({ files: [pdfFile] })) {
-        try {
-          await navigator.share({
-            files: [pdfFile],
-            title: fileName,
-            text: `Official Purchase Receipt ${orderNumber} - Josella Dolls`
-          });
-          showToast(`Receipt ${fileName} shared / saved!`);
-          return pdfBlob;
-        } catch (shareErr) {
-          console.warn('Web share skipped or dismissed:', shareErr);
-        }
-      }
-
-      // 2. Direct Anchor Click Download
       const blobUrl = URL.createObjectURL(pdfBlob);
+
+      // Trigger automatic background download link
       const link = document.createElement('a');
       link.href = blobUrl;
       link.download = fileName;
@@ -335,30 +331,30 @@ export default function App() {
       link.style.display = 'none';
       document.body.appendChild(link);
       link.click();
+      setTimeout(() => {
+        if (link.parentNode) link.parentNode.removeChild(link);
+      }, 3000);
 
-      // 3. Fallback jsPDF save
+      // Also trigger jsPDF save
       try {
         pdf.save(fileName);
       } catch (sErr) {
         console.warn('pdf.save warning:', sErr);
       }
 
-      // 4. Open preview tab as backup if iframe sandbox blocks direct blob downloading
-      setTimeout(() => {
-        if (link.parentNode) link.parentNode.removeChild(link);
-      }, 3000);
+      // Display interactive modal on screen so user has direct clickable links
+      setPdfReadyModal({
+        open: true,
+        pdfUrl: blobUrl,
+        pngUrl: imgData,
+        fileName: fileName
+      });
 
-      const openWin = window.open(blobUrl, '_blank');
-      if (!openWin) {
-        showToast(`PDF Receipt ${fileName} generated!`);
-      } else {
-        showToast(`PDF Receipt ${fileName} downloaded!`);
-      }
-
+      showToast(`Receipt PDF ${fileName} ready!`);
       return pdfBlob;
     } catch (err) {
       console.error('PDF Generation Error:', err);
-      showToast(`Downloaded ${fileName}`);
+      showToast(`Generated ${fileName}`);
       return null;
     } finally {
       if (renderContainer.parentNode) {
@@ -1367,6 +1363,81 @@ export default function App() {
             <div className="pt-2 border-t border-slate-100 flex justify-end">
               <button
                 onClick={() => setShareModalOpen(false)}
+                className="px-4 py-1.5 text-xs font-semibold bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg transition-colors"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* --- RECEIPT READY / DOWNLOAD MODAL (Directly Visible File Controls) --- */}
+      {pdfReadyModal.open && (
+        <div className="fixed inset-0 z-50 bg-slate-900/70 backdrop-blur-sm flex items-center justify-center p-4 no-print animate-fadeIn">
+          <div className="bg-white rounded-2xl max-w-lg w-full p-5 sm:p-6 shadow-2xl border border-slate-200 space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div className="flex items-center gap-2">
+                <CheckCircle2 className="w-6 h-6 text-pink-600 shrink-0" />
+                <h3 className="text-base sm:text-lg font-bold text-slate-900">
+                  Your Receipt File is Ready!
+                </h3>
+              </div>
+              <button
+                onClick={() => setPdfReadyModal({ ...pdfReadyModal, open: false })}
+                className="text-slate-400 hover:text-slate-600 font-bold text-xl px-2"
+              >
+                ✕
+              </button>
+            </div>
+
+            <p className="text-xs text-slate-600 leading-relaxed">
+              Receipt document <strong>{pdfReadyModal.fileName}</strong> generated successfully. Tap below to view or download:
+            </p>
+
+            {/* Receipt Image Visual Card */}
+            <div className="max-h-48 overflow-y-auto border border-slate-200 rounded-xl p-2 bg-slate-50 text-center">
+              <img
+                src={pdfReadyModal.pngUrl}
+                alt="Receipt Document Visual"
+                className="w-full h-auto rounded shadow-2xs mx-auto"
+              />
+            </div>
+
+            {/* Direct File Action Buttons */}
+            <div className="space-y-2 pt-1">
+              <a
+                href={pdfReadyModal.pdfUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="w-full py-3 px-4 rounded-xl bg-pink-700 hover:bg-pink-800 active:bg-pink-900 text-white font-bold text-xs flex items-center justify-center gap-2 shadow-sm transition-all text-center"
+              >
+                <FileText className="w-4 h-4" />
+                <span>1. View / Open PDF Document</span>
+              </a>
+
+              <a
+                href={pdfReadyModal.pdfUrl}
+                download={pdfReadyModal.fileName}
+                className="w-full py-2.5 px-4 rounded-xl bg-slate-800 hover:bg-slate-900 text-white font-bold text-xs flex items-center justify-center gap-2 transition-all text-center"
+              >
+                <FileDown className="w-4 h-4" />
+                <span>2. Download PDF File Directly</span>
+              </a>
+
+              <a
+                href={pdfReadyModal.pngUrl}
+                download={`${pdfReadyModal.fileName.replace('.pdf', '')}.png`}
+                className="w-full py-2.5 px-4 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold text-xs flex items-center justify-center gap-2 border border-slate-300 transition-all text-center"
+              >
+                <Download className="w-4 h-4 text-pink-600" />
+                <span>3. Save Receipt Image (PNG)</span>
+              </a>
+            </div>
+
+            <div className="pt-2 border-t border-slate-100 flex justify-end">
+              <button
+                onClick={() => setPdfReadyModal({ ...pdfReadyModal, open: false })}
                 className="px-4 py-1.5 text-xs font-semibold bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg transition-colors"
               >
                 Close
