@@ -259,13 +259,6 @@ export default function App() {
     setIsGeneratingPDF(true);
     showToast('Preparing official PDF receipt document...');
 
-    // If on mobile and currently viewing editor, switch to preview tab so #receipt-paper is visible
-    const wasEditorTab = activeTab === 'editor';
-    if (wasEditorTab) {
-      setActiveTab('preview');
-      await new Promise((r) => setTimeout(r, 250));
-    }
-
     const sourceElement = document.getElementById('receipt-paper');
     if (!sourceElement) {
       setIsGeneratingPDF(false);
@@ -276,6 +269,24 @@ export default function App() {
     const safeOrderNum = (orderNumber || 'JD-2026-1001').replace(/[^a-zA-Z0-9_-]/g, '_');
     const fileName = `Josella_Dolls_Receipt_${safeOrderNum}.pdf`;
 
+    // Create a temporary off-screen container for clean 800px width rendering (prevents hidden/squished elements on mobile)
+    const container = document.createElement('div');
+    container.style.position = 'fixed';
+    container.style.left = '-9999px';
+    container.style.top = '0';
+    container.style.width = '800px';
+    container.style.backgroundColor = '#ffffff';
+    container.style.zIndex = '-9999';
+
+    const clone = sourceElement.cloneNode(true) as HTMLElement;
+    clone.style.width = '800px';
+    clone.style.margin = '0';
+    clone.style.boxSizing = 'border-box';
+    clone.style.backgroundColor = '#ffffff';
+
+    container.appendChild(clone);
+    document.body.appendChild(container);
+
     try {
       if (document.fonts) {
         try {
@@ -285,49 +296,54 @@ export default function App() {
         }
       }
 
-      // Render live receipt-paper element directly to canvas (prevents transparency crash)
-      const canvas = await html2canvas(sourceElement, {
+      const canvas = await html2canvas(clone, {
         scale: 2,
         useCORS: true,
         allowTaint: false,
         logging: false,
-        backgroundColor: '#ffffff'
+        backgroundColor: '#ffffff',
+        ignoreElements: (el) => Boolean(el.classList && el.classList.contains('no-print'))
       });
 
-      // Convert canvas to JPEG image
+      if (container.parentNode) {
+        container.parentNode.removeChild(container);
+      }
+
       const imgData = canvas.toDataURL('image/jpeg', 0.98);
 
-      // Create jsPDF document
       const pdf = new jsPDF('p', 'mm', 'a4');
       const pdfWidth = pdf.internal.pageSize.getWidth(); // 210mm
       const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
 
       pdf.addImage(imgData, 'JPEG', 0, 0, pdfWidth, pdfHeight);
 
-      // Generate Blob and Blob URL
       const pdfBlob = pdf.output('blob');
       const blobUrl = URL.createObjectURL(pdfBlob);
 
-      // Trigger direct jsPDF file save
+      // 1. Direct jsPDF download
       try {
         pdf.save(fileName);
       } catch (saveErr) {
-        console.warn('pdf.save call error:', saveErr);
+        console.warn('pdf.save call warning:', saveErr);
       }
 
-      // Trigger programmatic anchor download click
-      const link = document.createElement('a');
-      link.href = blobUrl;
-      link.download = fileName;
-      link.setAttribute('download', fileName);
-      link.style.display = 'none';
-      document.body.appendChild(link);
-      link.click();
-      setTimeout(() => {
-        if (link.parentNode) link.parentNode.removeChild(link);
-      }, 3000);
+      // 2. Programmatic hidden link click download fallback
+      try {
+        const link = document.createElement('a');
+        link.href = blobUrl;
+        link.download = fileName;
+        link.setAttribute('download', fileName);
+        link.style.display = 'none';
+        document.body.appendChild(link);
+        link.click();
+        setTimeout(() => {
+          if (link.parentNode) link.parentNode.removeChild(link);
+        }, 3000);
+      } catch (linkErr) {
+        console.warn('Link download warning:', linkErr);
+      }
 
-      // Display interactive modal on screen so user has direct clickable view/download links
+      // 3. Open interactive PDF Ready modal for direct access
       setPdfReadyModal({
         open: true,
         pdfUrl: blobUrl,
@@ -338,13 +354,13 @@ export default function App() {
       showToast(`Receipt PDF ${fileName} ready!`);
       return pdfBlob;
     } catch (err) {
+      if (container.parentNode) {
+        container.parentNode.removeChild(container);
+      }
       console.error('PDF Generation Error:', err);
       showToast('Error generating PDF. Please try again.');
       return null;
     } finally {
-      if (wasEditorTab) {
-        setTimeout(() => setActiveTab('editor'), 600);
-      }
       setIsGeneratingPDF(false);
     }
   };
@@ -556,7 +572,7 @@ export default function App() {
             }`}
           >
             {/* Header Controls Toolbar */}
-            <div className="flex items-center justify-between bg-white p-4 rounded-2xl border border-slate-200/80 shadow-2xs">
+            <div className="flex items-center justify-between bg-white p-4 rounded-2xl border border-slate-200 shadow-2xs">
               <div className="flex items-center gap-2">
                 <FileText className="w-4 h-4 text-pink-600" />
                 <h2 className="text-xs sm:text-sm font-bold text-slate-900 tracking-wide uppercase flex items-center gap-1.5">
@@ -575,7 +591,7 @@ export default function App() {
             </div>
 
             {/* Order Header Settings */}
-            <div className="bg-white rounded-2xl p-5 sm:p-6 border border-slate-200/80 shadow-2xs space-y-4">
+            <div className="bg-white rounded-2xl p-5 sm:p-6 border border-slate-200 shadow-2xs space-y-4">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 {/* Receipt Number */}
                 <div>
@@ -658,7 +674,7 @@ export default function App() {
                       onClick={() => setOrderStatus('Paid')}
                       className={`py-2 px-3 text-xs font-bold rounded-xl border transition-all text-center flex items-center justify-center gap-2 ${
                         orderStatus === 'Paid'
-                          ? 'bg-emerald-50 text-emerald-900 border-emerald-400 ring-2 ring-emerald-400/30'
+                          ? 'bg-emerald-50 text-emerald-900 border-emerald-400 ring-2 ring-emerald-400'
                           : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
                       }`}
                     >
@@ -671,7 +687,7 @@ export default function App() {
                       onClick={() => setOrderStatus('Pending')}
                       className={`py-2 px-3 text-xs font-bold rounded-xl border transition-all text-center flex items-center justify-center gap-2 ${
                         orderStatus === 'Pending'
-                          ? 'bg-amber-50 text-amber-900 border-amber-400 ring-2 ring-amber-400/30'
+                          ? 'bg-amber-50 text-amber-900 border-amber-400 ring-2 ring-amber-400'
                           : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
                       }`}
                     >
@@ -684,7 +700,7 @@ export default function App() {
             </div>
 
             {/* Customer Information Block */}
-            <div className="bg-white rounded-2xl p-5 sm:p-6 border border-slate-200/80 shadow-2xs space-y-4">
+            <div className="bg-white rounded-2xl p-5 sm:p-6 border border-slate-200 shadow-2xs space-y-4">
               <div className="flex items-center gap-2 border-b border-slate-100 pb-3">
                 <User className="w-4 h-4 text-pink-600" />
                 <h2 className="text-xs sm:text-sm font-bold text-slate-900 tracking-wide uppercase">
@@ -738,7 +754,7 @@ export default function App() {
             </div>
 
             {/* Purchased Items Table */}
-            <div className="bg-white rounded-2xl p-5 sm:p-6 border border-slate-200/80 shadow-2xs space-y-4">
+            <div className="bg-white rounded-2xl p-5 sm:p-6 border border-slate-200 shadow-2xs space-y-4">
               <div className="flex items-center justify-between border-b border-slate-100 pb-3">
                 <div className="flex items-center gap-2">
                   <ShoppingBag className="w-4 h-4 text-pink-600" />
@@ -825,7 +841,7 @@ export default function App() {
                     </div>
 
                     {/* Calculated row summary */}
-                    <div className="flex justify-end pt-1.5 border-t border-slate-200/60">
+                    <div className="flex justify-end pt-1.5 border-t border-slate-200">
                       <span className="text-xs font-semibold text-slate-600">
                         Row Total: <span className="font-mono text-slate-900 font-bold">{formatCurrency(item.quantity * item.unitPrice, currency)}</span>
                       </span>
@@ -838,7 +854,7 @@ export default function App() {
               <button
                 type="button"
                 onClick={handleAddItem}
-                className="w-full py-2.5 border-2 border-dashed border-pink-200 hover:border-pink-400 bg-pink-50/50 hover:bg-pink-50 rounded-xl text-pink-700 text-xs font-bold flex items-center justify-center gap-2 transition-all"
+                className="w-full py-2.5 border-2 border-dashed border-pink-200 hover:border-pink-400 bg-pink-50 hover:bg-pink-100 rounded-xl text-pink-700 text-xs font-bold flex items-center justify-center gap-2 transition-all"
               >
                 <Plus className="w-4 h-4" />
                 Add Item Row
@@ -846,7 +862,7 @@ export default function App() {
             </div>
 
             {/* Financial Calculations & Adjustments */}
-            <div className="bg-white rounded-2xl p-5 sm:p-6 border border-slate-200/80 shadow-2xs space-y-4">
+            <div className="bg-white rounded-2xl p-5 sm:p-6 border border-slate-200 shadow-2xs space-y-4">
               <div className="flex items-center gap-2 border-b border-slate-100 pb-3">
                 <Tag className="w-4 h-4 text-pink-600" />
                 <h2 className="text-xs sm:text-sm font-bold text-slate-900 tracking-wide uppercase">
@@ -856,7 +872,7 @@ export default function App() {
 
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
                 {/* Shipping Fee */}
-                <div className="bg-slate-50 p-3 rounded-xl border border-slate-200/80 space-y-1">
+                <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 space-y-1">
                   <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider truncate">
                     Shipping ({currency})
                   </label>
@@ -871,7 +887,7 @@ export default function App() {
                 </div>
 
                 {/* Tax Rate % */}
-                <div className="bg-slate-50 p-3 rounded-xl border border-slate-200/80 space-y-1">
+                <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 space-y-1">
                   <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider truncate">
                     Tax Rate (%)
                   </label>
@@ -887,7 +903,7 @@ export default function App() {
                 </div>
 
                 {/* Discount */}
-                <div className="bg-slate-50 p-3 rounded-xl border border-slate-200/80 space-y-1">
+                <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 space-y-1">
                   <div className="flex items-center justify-between">
                     <label className="text-[11px] font-bold text-slate-700 uppercase tracking-wider truncate">
                       Discount
@@ -913,7 +929,7 @@ export default function App() {
             </div>
 
             {/* Notes & Terms */}
-            <div className="bg-white rounded-2xl p-5 sm:p-6 border border-slate-200/80 shadow-2xs space-y-4">
+            <div className="bg-white rounded-2xl p-5 sm:p-6 border border-slate-200 shadow-2xs space-y-4">
               <div className="flex items-center justify-between border-b border-slate-100 pb-3">
                 <div className="flex items-center gap-2">
                   <Edit3 className="w-4 h-4 text-pink-600" />
@@ -983,7 +999,7 @@ export default function App() {
                 className="bg-white border border-slate-200 rounded-2xl p-5 sm:p-8 lg:p-10 shadow-xl relative overflow-hidden transition-all text-slate-800"
               >
                 {/* Minimal Floral Doodle Accent in Top Right Corner */}
-                <DoodleCornerFloral className="absolute top-2 right-2 w-12 h-12 text-pink-300/40 pointer-events-none select-none no-print" />
+                <DoodleCornerFloral className="absolute top-2 right-2 w-12 h-12 text-pink-300 opacity-40 pointer-events-none select-none no-print" />
 
                 {/* Background Seal Watermark */}
                 <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 opacity-[0.03] pointer-events-none select-none text-center">
@@ -1001,11 +1017,11 @@ export default function App() {
                     {/* Brand Header */}
                     <div>
                       <div className="relative inline-block">
-                        <DoodleCrown className="w-6 h-4 text-pink-400/80 mb-0.5 block" />
+                        <DoodleCrown className="w-6 h-4 text-pink-400 opacity-80 mb-0.5 block" />
                         <h1 className="font-serif-luxury text-2xl sm:text-3xl font-bold tracking-tight text-slate-900 leading-tight">
                           Josella Dolls
                         </h1>
-                        <DoodleWavyLine className="w-24 h-2 text-pink-300/60 block mt-0.5" />
+                        <DoodleWavyLine className="w-24 h-2 text-pink-300 opacity-60 block mt-0.5" />
                       </div>
                       <p className="text-[10px] sm:text-xs font-bold tracking-wider uppercase text-pink-700 mt-1 leading-snug">
                         Luxury Beauty, Esthetic & Spa Product and Equipment suppliers
@@ -1044,7 +1060,7 @@ export default function App() {
                 </div>
 
                 {/* --- 2. BILLED TO / CUSTOMER INFO BLOCK --- */}
-                <div className="bg-slate-50/80 border border-slate-200 rounded-xl p-3.5 mb-5">
+                <div className="bg-slate-50 border border-slate-200 rounded-xl p-3.5 mb-5">
                   <div className="text-[10px] font-bold uppercase tracking-wider text-pink-800 mb-1 flex items-center gap-1">
                     <User className="w-3 h-3" />
                     <span>Billed / Shipped To:</span>
@@ -1072,7 +1088,7 @@ export default function App() {
                 <div className="mb-5 overflow-x-auto rounded-xl border border-slate-200">
                   <table className="w-full text-left border-collapse min-w-[500px] sm:min-w-0">
                     <thead>
-                      <tr className="bg-pink-100/70 border-b border-pink-200 text-pink-950 text-[10px] sm:text-[11px] font-bold uppercase tracking-wider">
+                      <tr className="bg-pink-100 border-b border-pink-200 text-pink-950 text-[10px] sm:text-[11px] font-bold uppercase tracking-wider">
                         <th className="py-2.5 px-3">#</th>
                         <th className="py-2.5 px-3">Item Description</th>
                         <th className="py-2.5 px-3 text-center">Qty</th>
@@ -1084,7 +1100,7 @@ export default function App() {
                       {items.map((item, index) => {
                         const lineTotal = item.quantity * item.unitPrice;
                         return (
-                          <tr key={item.id} className="hover:bg-slate-50/60 transition-colors">
+                          <tr key={item.id} className="hover:bg-slate-50 transition-colors">
                             <td className="py-2.5 px-3 font-semibold text-slate-400 text-center w-7 text-[11px]">
                               {index + 1}
                             </td>
@@ -1116,7 +1132,7 @@ export default function App() {
                       {orderStatus === 'Paid' ? (
                         <>
                           {stampStyle === 'classic' && (
-                            <div className="inline-flex flex-col items-center justify-center p-2.5 border-2 border-dashed border-emerald-600 text-emerald-700 bg-emerald-50/80 rounded-xl transform -rotate-3 select-none shadow-xs">
+                            <div className="inline-flex flex-col items-center justify-center p-2.5 border-2 border-dashed border-emerald-600 text-emerald-700 bg-emerald-50 rounded-xl transform -rotate-3 select-none shadow-xs">
                               <span className="text-base sm:text-lg font-black uppercase tracking-widest leading-none">
                                 ★ PAID ★
                               </span>
@@ -1200,7 +1216,7 @@ export default function App() {
                     )}
 
                     {/* Highlighted Grand Total Box (Optimized for High Numbers in FCFA) */}
-                    <div className="bg-pink-100/90 border border-pink-200/90 rounded-2xl p-3 sm:p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-1.5 sm:gap-2 font-bold text-pink-950 shadow-2xs overflow-hidden">
+                    <div className="bg-pink-100 border border-pink-200 rounded-2xl p-3 sm:p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-1.5 sm:gap-2 font-bold text-pink-950 shadow-2xs overflow-hidden">
                       <span className="text-xs uppercase tracking-wider flex items-center gap-1.5 shrink-0">
                         <span>Grand Total:</span>
                         <DoodleSparkle className="w-3.5 h-3.5 text-pink-600 opacity-80" />
@@ -1226,9 +1242,9 @@ export default function App() {
                       Luxury Beauty, Esthetic & Spa Product and Equipment suppliers
                     </p>
                     <p className="text-[9px] text-slate-400 font-semibold tracking-widest uppercase flex items-center justify-center gap-1.5">
-                      <DoodleMiniHeart className="w-2.5 h-2.5 text-pink-400 fill-pink-100" />
+                      <DoodleMiniHeart className="w-2.5 h-2.5 text-pink-400" />
                       <span>Thank You For Your Business</span>
-                      <DoodleMiniHeart className="w-2.5 h-2.5 text-pink-400 fill-pink-100" />
+                      <DoodleMiniHeart className="w-2.5 h-2.5 text-pink-400" />
                     </p>
                   </div>
                 </div>
@@ -1239,7 +1255,7 @@ export default function App() {
       </main>
 
       {/* --- MOBILE & TABLET STICKY BOTTOM ACTION BAR (strictly < 1024px NO-PRINT) --- */}
-      <div className="no-print fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-md border-t border-slate-200 p-2.5 shadow-lg lg:hidden flex items-center justify-between gap-2">
+      <div className="no-print fixed bottom-0 left-0 right-0 z-40 bg-white border-t border-slate-200 p-2.5 shadow-lg lg:hidden flex items-center justify-between gap-2">
         <button
           onClick={handleDownloadPDF}
           className="flex-1 py-2.5 px-3 text-xs font-bold text-white bg-pink-700 active:bg-pink-800 rounded-xl shadow-xs flex items-center justify-center gap-1.5 whitespace-nowrap cursor-pointer"
@@ -1259,7 +1275,7 @@ export default function App() {
 
       {/* --- SEND / SHARE MODAL --- */}
       {shareModalOpen && (
-        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 no-print animate-fadeIn">
+        <div className="fixed inset-0 z-50 bg-slate-900 bg-opacity-60 backdrop-blur-xs flex items-center justify-center p-4 no-print animate-fadeIn">
           <div className="bg-white rounded-2xl max-w-md w-full p-5 sm:p-6 shadow-2xl border border-slate-200 space-y-4">
             <div className="flex items-center justify-between border-b border-slate-100 pb-3">
               <div className="flex items-center gap-2">
@@ -1284,7 +1300,7 @@ export default function App() {
               {/* WhatsApp PDF Option */}
               <button
                 onClick={handleSendWhatsAppPDF}
-                className="w-full p-3 rounded-xl border border-emerald-200 bg-emerald-50 hover:bg-emerald-100/80 transition-all flex items-center justify-between group text-left"
+                className="w-full p-3 rounded-xl border border-emerald-200 bg-emerald-50 hover:bg-emerald-100 transition-all flex items-center justify-between group text-left"
               >
                 <div className="flex items-center gap-3">
                   <div className="w-9 h-9 rounded-full bg-emerald-600 flex items-center justify-center text-white shrink-0">
@@ -1304,7 +1320,7 @@ export default function App() {
               {/* Email PDF Option */}
               <button
                 onClick={handleSendEmailPDF}
-                className="w-full p-3 rounded-xl border border-blue-200 bg-blue-50 hover:bg-blue-100/80 transition-all flex items-center justify-between group text-left"
+                className="w-full p-3 rounded-xl border border-blue-200 bg-blue-50 hover:bg-blue-100 transition-all flex items-center justify-between group text-left"
               >
                 <div className="flex items-center gap-3">
                   <div className="w-9 h-9 rounded-full bg-blue-600 flex items-center justify-center text-white shrink-0">
@@ -1359,7 +1375,7 @@ export default function App() {
 
       {/* --- RECEIPT READY / DOWNLOAD MODAL (Directly Visible File Controls) --- */}
       {pdfReadyModal.open && (
-        <div className="fixed inset-0 z-50 bg-slate-900/70 backdrop-blur-sm flex items-center justify-center p-4 no-print animate-fadeIn">
+        <div className="fixed inset-0 z-50 bg-slate-900 bg-opacity-70 backdrop-blur-sm flex items-center justify-center p-4 no-print animate-fadeIn">
           <div className="bg-white rounded-2xl max-w-lg w-full p-5 sm:p-6 shadow-2xl border border-slate-200 space-y-4">
             <div className="flex items-center justify-between border-b border-slate-100 pb-3">
               <div className="flex items-center gap-2">
