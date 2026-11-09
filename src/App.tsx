@@ -27,6 +27,7 @@ import {
   Heart
 } from 'lucide-react';
 import html2canvas from 'html2canvas';
+import { toPng } from 'html-to-image';
 import jsPDF from 'jspdf';
 
 // --- MINIMAL ELEGANT SVG DOODLE ACCENTS ---
@@ -259,6 +260,13 @@ export default function App() {
     setIsGeneratingPDF(true);
     showToast('Preparing official PDF receipt document...');
 
+    // If on mobile editor tab, temporarily switch to preview tab so #receipt-paper is rendered in DOM layout
+    const wasEditorTab = activeTab === 'editor';
+    if (wasEditorTab) {
+      setActiveTab('preview');
+      await new Promise((r) => setTimeout(r, 200));
+    }
+
     const sourceElement = document.getElementById('receipt-paper');
     if (!sourceElement) {
       setIsGeneratingPDF(false);
@@ -269,24 +277,6 @@ export default function App() {
     const safeOrderNum = (orderNumber || 'JD-2026-1001').replace(/[^a-zA-Z0-9_-]/g, '_');
     const fileName = `Josella_Dolls_Receipt_${safeOrderNum}.pdf`;
 
-    // Create a temporary off-screen container for clean 800px width rendering (prevents hidden/squished elements on mobile)
-    const container = document.createElement('div');
-    container.style.position = 'fixed';
-    container.style.left = '-9999px';
-    container.style.top = '0';
-    container.style.width = '800px';
-    container.style.backgroundColor = '#ffffff';
-    container.style.zIndex = '-9999';
-
-    const clone = sourceElement.cloneNode(true) as HTMLElement;
-    clone.style.width = '800px';
-    clone.style.margin = '0';
-    clone.style.boxSizing = 'border-box';
-    clone.style.backgroundColor = '#ffffff';
-
-    container.appendChild(clone);
-    document.body.appendChild(container);
-
     try {
       if (document.fonts) {
         try {
@@ -296,31 +286,52 @@ export default function App() {
         }
       }
 
-      const canvas = await html2canvas(clone, {
-        scale: 2,
-        useCORS: true,
-        allowTaint: false,
-        logging: false,
-        backgroundColor: '#ffffff',
-        ignoreElements: (el) => Boolean(el.classList && el.classList.contains('no-print'))
-      });
+      let imgData = '';
 
-      if (container.parentNode) {
-        container.parentNode.removeChild(container);
+      // 1. Primary Rendering via html-to-image (Uses native browser SVG foreignObject rendering)
+      try {
+        imgData = await toPng(sourceElement, {
+          quality: 0.98,
+          pixelRatio: 2,
+          backgroundColor: '#ffffff',
+          filter: (node: any) => {
+            return !(node.classList && node.classList.contains('no-print'));
+          }
+        });
+      } catch (primaryErr) {
+        console.warn('html-to-image primary render warning, attempting fallback:', primaryErr);
+        // Fallback rendering via html2canvas
+        const canvas = await html2canvas(sourceElement, {
+          scale: 2,
+          useCORS: true,
+          allowTaint: false,
+          logging: false,
+          backgroundColor: '#ffffff',
+          ignoreElements: (el) => Boolean(el.classList && el.classList.contains('no-print'))
+        });
+        imgData = canvas.toDataURL('image/jpeg', 0.98);
       }
 
-      const imgData = canvas.toDataURL('image/jpeg', 0.98);
+      // Load image to determine exact dimensions
+      const img = new Image();
+      img.src = imgData;
+      await new Promise((resolve) => {
+        img.onload = resolve;
+        img.onerror = resolve;
+      });
 
       const pdf = new jsPDF('p', 'mm', 'a4');
       const pdfWidth = pdf.internal.pageSize.getWidth(); // 210mm
-      const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
+      const imgWidth = img.naturalWidth || 800;
+      const imgHeight = img.naturalHeight || 1130;
+      const pdfHeight = (imgHeight * pdfWidth) / imgWidth;
 
-      pdf.addImage(imgData, 'JPEG', 0, 0, pdfWidth, pdfHeight);
+      pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight);
 
       const pdfBlob = pdf.output('blob');
       const blobUrl = URL.createObjectURL(pdfBlob);
 
-      // 1. Direct jsPDF download
+      // 1. Direct jsPDF download save
       try {
         pdf.save(fileName);
       } catch (saveErr) {
@@ -343,7 +354,7 @@ export default function App() {
         console.warn('Link download warning:', linkErr);
       }
 
-      // 3. Open interactive PDF Ready modal for direct access
+      // 3. Open interactive PDF Ready modal for direct view/download
       setPdfReadyModal({
         open: true,
         pdfUrl: blobUrl,
@@ -353,12 +364,10 @@ export default function App() {
 
       showToast(`Receipt PDF ${fileName} ready!`);
       return pdfBlob;
-    } catch (err) {
-      if (container.parentNode) {
-        container.parentNode.removeChild(container);
-      }
+    } catch (err: any) {
       console.error('PDF Generation Error:', err);
-      showToast('Error generating PDF. Please try again.');
+      const errMsg = err?.message ? `Error: ${err.message}` : 'Error generating PDF. Please try again.';
+      showToast(errMsg);
       return null;
     } finally {
       setIsGeneratingPDF(false);
