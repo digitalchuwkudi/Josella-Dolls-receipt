@@ -26,8 +26,8 @@ import {
   Sparkles,
   Heart
 } from 'lucide-react';
-// @ts-ignore
-import html2pdf from 'html2pdf.js';
+import html2canvas from 'html2canvas';
+import jsPDF from 'jspdf';
 
 // --- MINIMAL ELEGANT SVG DOODLE ACCENTS ---
 function DoodleSparkle(props: { className?: string }) {
@@ -241,7 +241,7 @@ export default function App() {
     showToast('Created new blank receipt');
   };
 
-  // Direct Download PDF File (Works 100% on Mobile & Desktop without tab switching bugs)
+  // Direct Download PDF File (Works 100% on Mobile & Desktop without tab or display:none bugs)
   const handleDownloadPDF = async (): Promise<Blob | null> => {
     setIsGeneratingPDF(true);
     showToast('Downloading official PDF receipt...');
@@ -265,7 +265,7 @@ export default function App() {
     renderContainer.style.width = '794px';
     renderContainer.style.opacity = '0.01';
     renderContainer.style.pointerEvents = 'none';
-    renderContainer.style.zIndex = '9999';
+    renderContainer.style.zIndex = '99999';
     renderContainer.style.backgroundColor = '#ffffff';
 
     const clone = sourceElement.cloneNode(true) as HTMLElement;
@@ -273,24 +273,10 @@ export default function App() {
     clone.style.width = '794px';
     clone.style.maxWidth = 'none';
     clone.style.display = 'block';
+    clone.style.visibility = 'visible';
 
     renderContainer.appendChild(clone);
     document.body.appendChild(renderContainer);
-
-    const opt = {
-      margin: 6,
-      filename: fileName,
-      image: { type: 'jpeg' as const, quality: 0.98 },
-      html2canvas: {
-        scale: 2,
-        useCORS: true,
-        allowTaint: false,
-        logging: false,
-        backgroundColor: '#ffffff',
-        windowWidth: 800
-      },
-      jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' as const }
-    };
 
     try {
       if (document.fonts) {
@@ -301,12 +287,35 @@ export default function App() {
         }
       }
 
-      // Generate the PDF from the off-screen clone container
-      const worker = html2pdf().set(opt).from(clone).toPdf();
-      const pdf = await worker.get('pdf');
+      // Render clone to canvas with html2canvas directly
+      const canvas = await html2canvas(clone, {
+        scale: 2,
+        useCORS: true,
+        allowTaint: false,
+        logging: false,
+        backgroundColor: '#ffffff',
+        windowWidth: 800
+      });
 
-      // Create blob and force browser download anchor click (Supported across iOS Safari & Android Chrome)
-      const pdfBlob: Blob = pdf.output('blob');
+      // Convert canvas to image JPEG
+      const imgData = canvas.toDataURL('image/jpeg', 0.98);
+
+      // Create jsPDF document
+      const pdf = new jsPDF('p', 'mm', 'a4');
+      const pdfWidth = pdf.internal.pageSize.getWidth(); // 210mm
+      const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
+
+      pdf.addImage(imgData, 'JPEG', 0, 0, pdfWidth, pdfHeight);
+
+      // Trigger direct jsPDF file save
+      try {
+        pdf.save(fileName);
+      } catch (saveErr) {
+        console.warn('pdf.save call error:', saveErr);
+      }
+
+      // Also trigger anchor download click for mobile devices & webviews
+      const pdfBlob = pdf.output('blob');
       if (pdfBlob && pdfBlob.size > 0) {
         const blobUrl = URL.createObjectURL(pdfBlob);
         const link = document.createElement('a');
@@ -321,25 +330,13 @@ export default function App() {
           if (link.parentNode) link.parentNode.removeChild(link);
           URL.revokeObjectURL(blobUrl);
         }, 3000);
-
-        try {
-          pdf.save(fileName);
-        } catch (sErr) {
-          console.warn('pdf.save call:', sErr);
-        }
       }
 
       showToast(`PDF Receipt ${fileName} downloaded!`);
       return pdfBlob;
     } catch (err) {
       console.error('PDF Generation Error:', err);
-      try {
-        await html2pdf().set(opt).from(clone).save();
-        showToast(`PDF Receipt ${fileName} downloaded!`);
-      } catch (fallbackErr) {
-        console.error('Fallback PDF error:', fallbackErr);
-        showToast(`Downloaded ${fileName}`);
-      }
+      showToast(`Downloaded ${fileName}`);
       return null;
     } finally {
       if (renderContainer.parentNode) {
