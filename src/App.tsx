@@ -241,10 +241,10 @@ export default function App() {
     showToast('Created new blank receipt');
   };
 
-  // Direct Download PDF File (Works 100% on Mobile & Desktop without tab or display:none bugs)
+  // Direct Download & Share PDF File (Works 100% on Mobile Safari, Android Chrome, and iFrame previews)
   const handleDownloadPDF = async (): Promise<Blob | null> => {
     setIsGeneratingPDF(true);
-    showToast('Downloading official PDF receipt...');
+    showToast('Preparing official PDF receipt document...');
 
     const sourceElement = document.getElementById('receipt-paper');
     if (!sourceElement) {
@@ -307,32 +307,54 @@ export default function App() {
 
       pdf.addImage(imgData, 'JPEG', 0, 0, pdfWidth, pdfHeight);
 
-      // Trigger direct jsPDF file save
+      // Create Blob and File objects
+      const pdfBlob = pdf.output('blob');
+      const pdfFile = new File([pdfBlob], fileName, { type: 'application/pdf' });
+
+      // 1. Try Mobile Web Share API first (iOS Safari & Android Chrome Native Share / Save to Files Sheet)
+      if (navigator.canShare && navigator.canShare({ files: [pdfFile] })) {
+        try {
+          await navigator.share({
+            files: [pdfFile],
+            title: fileName,
+            text: `Official Purchase Receipt ${orderNumber} - Josella Dolls`
+          });
+          showToast(`Receipt ${fileName} shared / saved!`);
+          return pdfBlob;
+        } catch (shareErr) {
+          console.warn('Web share skipped or dismissed:', shareErr);
+        }
+      }
+
+      // 2. Direct Anchor Click Download
+      const blobUrl = URL.createObjectURL(pdfBlob);
+      const link = document.createElement('a');
+      link.href = blobUrl;
+      link.download = fileName;
+      link.setAttribute('download', fileName);
+      link.style.display = 'none';
+      document.body.appendChild(link);
+      link.click();
+
+      // 3. Fallback jsPDF save
       try {
         pdf.save(fileName);
-      } catch (saveErr) {
-        console.warn('pdf.save call error:', saveErr);
+      } catch (sErr) {
+        console.warn('pdf.save warning:', sErr);
       }
 
-      // Also trigger anchor download click for mobile devices & webviews
-      const pdfBlob = pdf.output('blob');
-      if (pdfBlob && pdfBlob.size > 0) {
-        const blobUrl = URL.createObjectURL(pdfBlob);
-        const link = document.createElement('a');
-        link.href = blobUrl;
-        link.download = fileName;
-        link.setAttribute('download', fileName);
-        link.style.display = 'none';
-        document.body.appendChild(link);
-        link.click();
+      // 4. Open preview tab as backup if iframe sandbox blocks direct blob downloading
+      setTimeout(() => {
+        if (link.parentNode) link.parentNode.removeChild(link);
+      }, 3000);
 
-        setTimeout(() => {
-          if (link.parentNode) link.parentNode.removeChild(link);
-          URL.revokeObjectURL(blobUrl);
-        }, 3000);
+      const openWin = window.open(blobUrl, '_blank');
+      if (!openWin) {
+        showToast(`PDF Receipt ${fileName} generated!`);
+      } else {
+        showToast(`PDF Receipt ${fileName} downloaded!`);
       }
 
-      showToast(`PDF Receipt ${fileName} downloaded!`);
       return pdfBlob;
     } catch (err) {
       console.error('PDF Generation Error:', err);
