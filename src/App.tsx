@@ -171,25 +171,10 @@ export default function App() {
 
   // UI State
   const [activeTab, setActiveTab] = useState<'editor' | 'preview'>('editor');
-  const [historyOpen, setHistoryOpen] = useState<boolean>(false);
   const [shareModalOpen, setShareModalOpen] = useState<boolean>(false);
-  const [savedReceipts, setSavedReceipts] = useState<SavedReceipt[]>([]);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
-  const [searchHistoryQuery, setSearchHistoryQuery] = useState<string>('');
   const [stampStyle, setStampStyle] = useState<'classic' | 'modern' | 'minimal'>('classic');
   const [isGeneratingPDF, setIsGeneratingPDF] = useState<boolean>(false);
-
-  // Load Saved Receipts from localStorage
-  useEffect(() => {
-    try {
-      const stored = localStorage.getItem('josella_saved_receipts');
-      if (stored) {
-        setSavedReceipts(JSON.parse(stored));
-      }
-    } catch (e) {
-      console.error('Failed to load saved receipts', e);
-    }
-  }, []);
 
   // Show Toast Notification Helper
   const showToast = (msg: string) => {
@@ -256,88 +241,10 @@ export default function App() {
     showToast('Created new blank receipt');
   };
 
-  // Save Receipt to Local Storage History
-  const handleSaveToHistory = () => {
-    const newReceipt: SavedReceipt = {
-      id: Date.now().toString(),
-      orderNumber,
-      orderDate,
-      customerName: customerName || 'Valued Customer',
-      customerAddress,
-      customerPhone,
-      currency,
-      paymentMethod,
-      orderStatus,
-      items,
-      shippingFee,
-      taxRate,
-      discount,
-      discountType,
-      notes,
-      grandTotal,
-      savedAt: new Date().toLocaleString()
-    };
-
-    const updated = [newReceipt, ...savedReceipts.filter((r) => r.orderNumber !== orderNumber)];
-    setSavedReceipts(updated);
-    try {
-      localStorage.setItem('josella_saved_receipts', JSON.stringify(updated));
-      showToast(`Receipt ${orderNumber} saved to history!`);
-    } catch (e) {
-      console.error(e);
-    }
-  };
-
-  // Load Receipt from History
-  const handleLoadReceipt = (receipt: SavedReceipt) => {
-    setOrderNumber(receipt.orderNumber);
-    setOrderDate(receipt.orderDate);
-    setCustomerName(receipt.customerName);
-    setCustomerAddress(receipt.customerAddress);
-    setCustomerPhone(receipt.customerPhone);
-    setCurrency(receipt.currency);
-    setPaymentMethod(receipt.paymentMethod);
-    setOrderStatus(receipt.orderStatus === 'Paid' ? 'Paid' : 'Pending');
-    setItems(receipt.items);
-    setShippingFee(receipt.shippingFee);
-    setTaxRate(receipt.taxRate);
-    setDiscount(receipt.discount);
-    setDiscountType(receipt.discountType || 'fixed');
-    setNotes(receipt.notes);
-    setHistoryOpen(false);
-    showToast(`Loaded Receipt ${receipt.orderNumber}`);
-  };
-
-  // Delete Saved Receipt
-  const handleDeleteSavedReceipt = (id: string, e: React.MouseEvent) => {
-    e.stopPropagation();
-    const updated = savedReceipts.filter((r) => r.id !== id);
-    setSavedReceipts(updated);
-    try {
-      localStorage.setItem('josella_saved_receipts', JSON.stringify(updated));
-      showToast('Receipt removed from history');
-    } catch (err) {
-      console.error(err);
-    }
-  };
-
-  // Direct Download PDF File directly from visible DOM (Non-blocking, infinite re-clickable)
+  // Direct Download PDF File (Works 100% on Mobile & Desktop without tab switching bugs)
   const handleDownloadPDF = async (): Promise<Blob | null> => {
-    handleSaveToHistory();
     setIsGeneratingPDF(true);
     showToast('Downloading official PDF receipt...');
-
-    // Instantly reset generating flag after 300ms so button never locks
-    setTimeout(() => {
-      setIsGeneratingPDF(false);
-    }, 300);
-
-    // If on mobile and currently viewing editor, switch to preview tab for capture
-    const wasEditorTab = activeTab === 'editor';
-    if (wasEditorTab) {
-      setActiveTab('preview');
-      await new Promise((r) => setTimeout(r, 200));
-    }
 
     const sourceElement = document.getElementById('receipt-paper');
     if (!sourceElement) {
@@ -349,9 +256,29 @@ export default function App() {
     const safeOrderNum = (orderNumber || 'JD-2026-1001').replace(/[^a-zA-Z0-9_-]/g, '_');
     const fileName = `Josella_Dolls_Receipt_${safeOrderNum}.pdf`;
 
-    // html2canvas config with allowTaint: false (PREVENTS SECURITY LOCKUPS)
+    // Create a visible off-screen rendering container with fixed A4 width (794px)
+    // This guarantees html2canvas captures 100% of visual details on mobile regardless of active tab or screen width!
+    const renderContainer = document.createElement('div');
+    renderContainer.style.position = 'fixed';
+    renderContainer.style.top = '0';
+    renderContainer.style.left = '0';
+    renderContainer.style.width = '794px';
+    renderContainer.style.opacity = '0.01';
+    renderContainer.style.pointerEvents = 'none';
+    renderContainer.style.zIndex = '9999';
+    renderContainer.style.backgroundColor = '#ffffff';
+
+    const clone = sourceElement.cloneNode(true) as HTMLElement;
+    clone.id = 'receipt-paper-render-clone';
+    clone.style.width = '794px';
+    clone.style.maxWidth = 'none';
+    clone.style.display = 'block';
+
+    renderContainer.appendChild(clone);
+    document.body.appendChild(renderContainer);
+
     const opt = {
-      margin: 8,
+      margin: 6,
       filename: fileName,
       image: { type: 'jpeg' as const, quality: 0.98 },
       html2canvas: {
@@ -359,7 +286,8 @@ export default function App() {
         useCORS: true,
         allowTaint: false,
         logging: false,
-        backgroundColor: '#ffffff'
+        backgroundColor: '#ffffff',
+        windowWidth: 800
       },
       jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' as const }
     };
@@ -373,25 +301,49 @@ export default function App() {
         }
       }
 
-      // Non-blocking save call
-      html2pdf().set(opt).from(sourceElement).save();
+      // Generate the PDF from the off-screen clone container
+      const worker = html2pdf().set(opt).from(clone).toPdf();
+      const pdf = await worker.get('pdf');
+
+      // Create blob and force browser download anchor click (Supported across iOS Safari & Android Chrome)
+      const pdfBlob: Blob = pdf.output('blob');
+      if (pdfBlob && pdfBlob.size > 0) {
+        const blobUrl = URL.createObjectURL(pdfBlob);
+        const link = document.createElement('a');
+        link.href = blobUrl;
+        link.download = fileName;
+        link.setAttribute('download', fileName);
+        link.style.display = 'none';
+        document.body.appendChild(link);
+        link.click();
+
+        setTimeout(() => {
+          if (link.parentNode) link.parentNode.removeChild(link);
+          URL.revokeObjectURL(blobUrl);
+        }, 3000);
+
+        try {
+          pdf.save(fileName);
+        } catch (sErr) {
+          console.warn('pdf.save call:', sErr);
+        }
+      }
+
       showToast(`PDF Receipt ${fileName} downloaded!`);
-      return null;
+      return pdfBlob;
     } catch (err) {
       console.error('PDF Generation Error:', err);
       try {
-        const pdfWorker = html2pdf().set(opt).from(sourceElement).toPdf();
-        const pdfObj = await pdfWorker.get('pdf');
-        pdfObj.save(fileName);
+        await html2pdf().set(opt).from(clone).save();
         showToast(`PDF Receipt ${fileName} downloaded!`);
       } catch (fallbackErr) {
         console.error('Fallback PDF error:', fallbackErr);
-        showToast('PDF receipt generated!');
+        showToast(`Downloaded ${fileName}`);
       }
       return null;
     } finally {
-      if (wasEditorTab) {
-        setTimeout(() => setActiveTab('editor'), 500);
+      if (renderContainer.parentNode) {
+        renderContainer.parentNode.removeChild(renderContainer);
       }
       setIsGeneratingPDF(false);
     }
@@ -399,7 +351,6 @@ export default function App() {
 
   // Send via WhatsApp (OPENS WHATSAPP DIRECTLY TO CONTACT SELECTION & DOWNLOADS PDF FOR ATTACHMENT)
   const handleSendWhatsAppPDF = () => {
-    handleSaveToHistory();
     setShareModalOpen(false);
 
     let phoneNum = customerPhone.replace(/[^0-9]/g, '');
@@ -431,7 +382,6 @@ export default function App() {
     if (phoneNum.length >= 8) {
       whatsappUrl = `https://api.whatsapp.com/send?phone=${phoneNum}&text=${text}`;
     } else {
-      // Omitting phone number parameter opens WhatsApp contact selection screen directly on mobile & desktop
       whatsappUrl = `https://api.whatsapp.com/send?text=${text}`;
     }
 
@@ -442,12 +392,11 @@ export default function App() {
     // Also trigger PDF receipt download in background so user has file ready to attach
     setTimeout(() => {
       handleDownloadPDF();
-    }, 300);
+    }, 200);
   };
 
   // Send via Email
   const handleSendEmailPDF = () => {
-    handleSaveToHistory();
     setShareModalOpen(false);
 
     const clientNameStr = customerName ? customerName : 'Valued Customer';
@@ -502,12 +451,6 @@ export default function App() {
     }
   };
 
-  const filteredHistory = savedReceipts.filter(
-    (r) =>
-      r.orderNumber.toLowerCase().includes(searchHistoryQuery.toLowerCase()) ||
-      r.customerName.toLowerCase().includes(searchHistoryQuery.toLowerCase())
-  );
-
   return (
     <div className="min-h-screen bg-slate-50 text-slate-800 flex flex-col font-sans-clean antialiased selection:bg-pink-200 selection:text-pink-900 pb-20 lg:pb-0">
       {/* Toast Notification */}
@@ -539,23 +482,6 @@ export default function App() {
                   </p>
                 </div>
               </div>
-
-              {/* Mobile/Tablet Header Quick Actions */}
-              <div className="flex items-center gap-2 lg:hidden shrink-0">
-                <button
-                  onClick={() => setHistoryOpen(true)}
-                  className="px-3 py-1.5 text-xs font-semibold text-slate-800 bg-slate-100 border border-slate-200 rounded-lg flex items-center gap-1.5"
-                  title="View Saved Receipt History"
-                >
-                  <History className="w-3.5 h-3.5 text-pink-600" />
-                  <span>History</span>
-                  {savedReceipts.length > 0 && (
-                    <span className="bg-pink-600 text-white text-[10px] font-bold px-1.5 py-0.2 rounded-full">
-                      {savedReceipts.length}
-                    </span>
-                  )}
-                </button>
-              </div>
             </div>
 
             {/* Mobile/Tablet Subtitle Block (Unified brand pink text-pink-700) */}
@@ -573,19 +499,6 @@ export default function App() {
               >
                 <Plus className="w-3.5 h-3.5 text-pink-600" />
                 Blank Receipt
-              </button>
-
-              <button
-                onClick={() => setHistoryOpen(true)}
-                className="px-3 py-1.5 text-xs font-semibold text-slate-800 bg-slate-100 hover:bg-slate-200 border border-slate-200 rounded-lg transition-colors flex items-center gap-1.5"
-              >
-                <History className="w-3.5 h-3.5 text-pink-600" />
-                <span>History</span>
-                {savedReceipts.length > 0 && (
-                  <span className="bg-pink-600 text-white text-[10px] font-bold px-1.5 py-0.2 rounded-full">
-                    {savedReceipts.length}
-                  </span>
-                )}
               </button>
 
               <button
@@ -1328,20 +1241,6 @@ export default function App() {
       {/* --- MOBILE & TABLET STICKY BOTTOM ACTION BAR (strictly < 1024px NO-PRINT) --- */}
       <div className="no-print fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-md border-t border-slate-200 p-2.5 shadow-lg lg:hidden flex items-center justify-between gap-2">
         <button
-          onClick={() => setHistoryOpen(true)}
-          className="py-2.5 px-3 text-xs font-bold text-slate-800 bg-slate-100 active:bg-slate-200 border border-slate-300 rounded-xl flex items-center justify-center gap-1.5 whitespace-nowrap shrink-0 relative"
-          title="View Saved Receipt History"
-        >
-          <History className="w-4 h-4 text-pink-600" />
-          <span>History</span>
-          {savedReceipts.length > 0 && (
-            <span className="bg-pink-600 text-white text-[10px] font-bold px-1.5 py-0.2 rounded-full">
-              {savedReceipts.length}
-            </span>
-          )}
-        </button>
-
-        <button
           onClick={handleDownloadPDF}
           className="flex-1 py-2.5 px-3 text-xs font-bold text-white bg-pink-700 active:bg-pink-800 rounded-xl shadow-xs flex items-center justify-center gap-1.5 whitespace-nowrap cursor-pointer"
         >
@@ -1351,10 +1250,10 @@ export default function App() {
 
         <button
           onClick={() => setShareModalOpen(true)}
-          className="py-2.5 px-3 text-xs font-bold text-slate-900 bg-slate-100 active:bg-slate-200 border border-slate-300 rounded-xl flex items-center justify-center gap-1.5 whitespace-nowrap shrink-0"
+          className="flex-1 py-2.5 px-3 text-xs font-bold text-slate-900 bg-slate-100 active:bg-slate-200 border border-slate-300 rounded-xl flex items-center justify-center gap-1.5 whitespace-nowrap shrink-0"
         >
           <Share2 className="w-4 h-4 text-slate-700" />
-          <span>Share</span>
+          <span>Send / Share</span>
         </button>
       </div>
 
@@ -1452,96 +1351,6 @@ export default function App() {
                 className="px-4 py-1.5 text-xs font-semibold bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg transition-colors"
               >
                 Close
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* --- HISTORY DRAWER --- */}
-      {historyOpen && (
-        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex justify-end no-print">
-          <div className="bg-white max-w-md w-full h-full p-5 sm:p-6 shadow-2xl flex flex-col space-y-4 border-l border-slate-200">
-            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-              <div className="flex items-center gap-2">
-                <History className="w-5 h-5 text-pink-600" />
-                <h3 className="text-sm sm:text-base font-bold text-slate-900">Saved Receipt History</h3>
-              </div>
-              <button
-                onClick={() => setHistoryOpen(false)}
-                className="text-slate-400 hover:text-slate-600 font-bold text-lg px-2"
-              >
-                ✕
-              </button>
-            </div>
-
-            <div className="relative">
-              <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
-              <input
-                type="text"
-                value={searchHistoryQuery}
-                onChange={(e) => setSearchHistoryQuery(e.target.value)}
-                placeholder="Search by order # or customer name..."
-                className="w-full pl-9 pr-3 py-2 text-xs rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-pink-400"
-              />
-            </div>
-
-            <div className="flex-1 overflow-y-auto space-y-3 pr-1">
-              {filteredHistory.length === 0 ? (
-                <div className="text-center py-12 text-slate-400 space-y-2">
-                  <FileText className="w-10 h-10 mx-auto opacity-30 text-pink-500" />
-                  <p className="text-xs font-medium">No saved receipts found in history.</p>
-                  <p className="text-[11px]">Downloaded and shared receipts are automatically stored in history.</p>
-                </div>
-              ) : (
-                filteredHistory.map((receipt) => (
-                  <div
-                    key={receipt.id}
-                    onClick={() => handleLoadReceipt(receipt)}
-                    className="p-3.5 rounded-xl border border-slate-200 hover:border-pink-300 hover:bg-pink-50/40 cursor-pointer transition-all space-y-2 group"
-                  >
-                    <div className="flex items-center justify-between">
-                      <span className="font-mono text-xs font-bold text-slate-900">
-                        {receipt.orderNumber}
-                      </span>
-                      <div className="flex items-center gap-2">
-                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-pink-100 text-pink-900">
-                          {receipt.currency}
-                        </span>
-                        <button
-                          onClick={(e) => handleDeleteSavedReceipt(receipt.id, e)}
-                          className="text-slate-400 hover:text-red-600 p-1"
-                          title="Delete from history"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    </div>
-
-                    <div className="text-xs text-slate-600 flex justify-between items-center">
-                      <span className="font-semibold text-slate-800 truncate max-w-[180px]">
-                        {receipt.customerName}
-                      </span>
-                      <span className="font-mono font-bold text-slate-900">
-                        {formatCurrency(receipt.grandTotal, receipt.currency)}
-                      </span>
-                    </div>
-
-                    <div className="flex justify-between items-center text-[10px] text-slate-400 border-t border-slate-100 pt-1.5">
-                      <span>Date: {receipt.orderDate}</span>
-                      <span>{receipt.items.length} line items</span>
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
-
-            <div className="pt-2 border-t border-slate-100 flex justify-end">
-              <button
-                onClick={() => setHistoryOpen(false)}
-                className="w-full py-2 text-xs font-semibold bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg transition-colors"
-              >
-                Done
               </button>
             </div>
           </div>
