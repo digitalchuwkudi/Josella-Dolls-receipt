@@ -260,7 +260,7 @@ export default function App() {
     setIsGeneratingPDF(true);
     showToast('Preparing official PDF receipt document...');
 
-    // If on mobile editor tab, temporarily switch to preview tab so #receipt-paper is rendered in DOM layout
+    // If on mobile editor tab, temporarily switch to preview tab so #receipt-paper is visible in DOM
     const wasEditorTab = activeTab === 'editor';
     if (wasEditorTab) {
       setActiveTab('preview');
@@ -288,7 +288,7 @@ export default function App() {
 
       let imgData = '';
 
-      // --- LEVEL 1: html-to-image with skipFonts: true (Bypasses CORS font fetch errors) ---
+      // Capture live visual preview element directly from DOM
       try {
         imgData = await toPng(sourceElement, {
           quality: 0.98,
@@ -300,76 +300,23 @@ export default function App() {
           }
         });
       } catch (err1) {
-        console.warn('Level 1 render warning:', err1);
-
-        // --- LEVEL 2: Native SVG ForeignObject Canvas Rendering ---
-        try {
-          const clone = sourceElement.cloneNode(true) as HTMLElement;
-          const noPrints = clone.querySelectorAll('.no-print');
-          noPrints.forEach((el) => el.remove());
-
-          const styles = Array.from(document.querySelectorAll('style, link[rel="stylesheet"]'))
-            .map((el) => el.outerHTML)
-            .join('\n');
-
-          const width = sourceElement.offsetWidth || 800;
-          const height = sourceElement.offsetHeight || 1100;
-
-          const svgString = `
-            <svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}">
-              <foreignObject width="100%" height="100%">
-                <div xmlns="http://www.w3.org/1999/xhtml">
-                  ${styles}
-                  <div style="background-color: #ffffff; width: ${width}px; min-height: ${height}px; box-sizing: border-box; padding: 20px;">
-                    ${clone.innerHTML}
-                  </div>
-                </div>
-              </foreignObject>
-            </svg>
-          `;
-
-          const svgBlob = new Blob([svgString], { type: 'image/svg+xml;charset=utf-8' });
-          const svgUrl = URL.createObjectURL(svgBlob);
-
-          const svgImg = new Image();
-          svgImg.src = svgUrl;
-          await new Promise((resolve, reject) => {
-            svgImg.onload = resolve;
-            svgImg.onerror = reject;
-          });
-
-          const canvas = document.createElement('canvas');
-          canvas.width = width * 2;
-          canvas.height = height * 2;
-          const ctx = canvas.getContext('2d');
-          if (ctx) {
-            ctx.fillStyle = '#ffffff';
-            ctx.fillRect(0, 0, canvas.width, canvas.height);
-            ctx.drawImage(svgImg, 0, 0, canvas.width, canvas.height);
-            imgData = canvas.toDataURL('image/jpeg', 0.95);
-          }
-          URL.revokeObjectURL(svgUrl);
-        } catch (err2) {
-          console.warn('Level 2 render warning:', err2);
-
-          // --- LEVEL 3: html2canvas fallback ---
-          const canvas = await html2canvas(sourceElement, {
-            scale: 2,
-            useCORS: true,
-            allowTaint: false,
-            logging: false,
-            backgroundColor: '#ffffff',
-            ignoreElements: (el) => Boolean(el.classList && el.classList.contains('no-print'))
-          });
-          imgData = canvas.toDataURL('image/jpeg', 0.98);
-        }
+        console.warn('toPng direct capture warning, trying html2canvas fallback:', err1);
+        const canvas = await html2canvas(sourceElement, {
+          scale: 2,
+          useCORS: true,
+          allowTaint: false,
+          logging: false,
+          backgroundColor: '#ffffff',
+          ignoreElements: (el) => Boolean(el.classList && el.classList.contains('no-print'))
+        });
+        imgData = canvas.toDataURL('image/jpeg', 0.98);
       }
 
       if (!imgData) {
         throw new Error('Could not render receipt image.');
       }
 
-      // Load final image properties
+      // Load image dimensions
       const img = new Image();
       img.src = imgData;
       await new Promise((resolve) => {
@@ -387,45 +334,15 @@ export default function App() {
 
       const pdfBlob = pdf.output('blob');
       const blobUrl = URL.createObjectURL(pdfBlob);
-      const pdfFile = new File([pdfBlob], fileName, { type: 'application/pdf' });
 
-      // 1. Direct jsPDF download save
+      // Trigger ONLY ONE direct file save
       try {
         pdf.save(fileName);
       } catch (saveErr) {
         console.warn('pdf.save call warning:', saveErr);
       }
 
-      // 2. Programmatic hidden link click download fallback
-      try {
-        const link = document.createElement('a');
-        link.href = blobUrl;
-        link.download = fileName;
-        link.setAttribute('download', fileName);
-        link.style.display = 'none';
-        document.body.appendChild(link);
-        link.click();
-        setTimeout(() => {
-          if (link.parentNode) link.parentNode.removeChild(link);
-        }, 3000);
-      } catch (linkErr) {
-        console.warn('Link download warning:', linkErr);
-      }
-
-      // 3. Native Web Share API if supported on mobile
-      if (navigator.canShare && navigator.canShare({ files: [pdfFile] })) {
-        try {
-          await navigator.share({
-            title: fileName,
-            text: `Receipt ${orderNumber} - Josella Dolls`,
-            files: [pdfFile]
-          });
-        } catch (shareErr) {
-          console.warn('Web Share warning:', shareErr);
-        }
-      }
-
-      // 4. Open interactive PDF Ready modal
+      // Open interactive PDF Ready modal for direct access
       setPdfReadyModal({
         open: true,
         pdfUrl: blobUrl,
@@ -1081,7 +998,7 @@ export default function App() {
             <div className="relative">
               <div
                 id="receipt-paper"
-                className="bg-white border border-slate-200 rounded-2xl p-5 sm:p-8 lg:p-10 shadow-xl relative overflow-hidden transition-all text-slate-800"
+                className="bg-white border border-slate-200 rounded-2xl p-3.5 sm:p-6 lg:p-10 shadow-xl relative overflow-hidden transition-all text-slate-800"
               >
                 {/* Minimal Floral Doodle Accent in Top Right Corner */}
                 <DoodleCornerFloral className="absolute top-2 right-2 w-12 h-12 text-pink-300 opacity-40 pointer-events-none select-none no-print" />
@@ -1169,36 +1086,36 @@ export default function App() {
                   </div>
                 </div>
 
-                {/* --- 3. ITEMIZED TABLE WITH SCROLL & MIN-WIDTH FOR LARGE FCFA PRICES --- */}
+                {/* --- 3. ITEMIZED TABLE --- */}
                 <div className="mb-5 overflow-x-auto rounded-xl border border-slate-200">
-                  <table className="w-full text-left border-collapse min-w-[500px] sm:min-w-0">
+                  <table className="w-full text-left border-collapse">
                     <thead>
-                      <tr className="bg-pink-100 border-b border-pink-200 text-pink-950 text-[10px] sm:text-[11px] font-bold uppercase tracking-wider">
-                        <th className="py-2.5 px-3">#</th>
-                        <th className="py-2.5 px-3">Item Description</th>
-                        <th className="py-2.5 px-3 text-center">Qty</th>
-                        <th className="py-2.5 px-3 text-right whitespace-nowrap">Unit Price</th>
-                        <th className="py-2.5 px-3 text-right whitespace-nowrap min-w-[120px]">Total ({currency})</th>
+                      <tr className="bg-pink-100 border-b border-pink-200 text-pink-950 text-[9px] sm:text-[11px] font-bold uppercase tracking-wider">
+                        <th className="py-2 px-2 sm:py-2.5 sm:px-3 text-center w-6">#</th>
+                        <th className="py-2 px-2 sm:py-2.5 sm:px-3">Item Description</th>
+                        <th className="py-2 px-2 sm:py-2.5 sm:px-3 text-center">Qty</th>
+                        <th className="py-2 px-2 sm:py-2.5 sm:px-3 text-right whitespace-nowrap">Unit Price</th>
+                        <th className="py-2 px-2 sm:py-2.5 sm:px-3 text-right whitespace-nowrap">Total ({currency})</th>
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-slate-100 text-xs text-slate-700">
+                    <tbody className="divide-y divide-slate-100 text-[10px] sm:text-xs text-slate-700">
                       {items.map((item, index) => {
                         const lineTotal = item.quantity * item.unitPrice;
                         return (
                           <tr key={item.id} className="hover:bg-slate-50 transition-colors">
-                            <td className="py-2.5 px-3 font-semibold text-slate-400 text-center w-7 text-[11px]">
+                            <td className="py-2 px-2 sm:py-2.5 sm:px-3 font-semibold text-slate-400 text-center text-[10px]">
                               {index + 1}
                             </td>
-                            <td className="py-2.5 px-3 font-semibold text-slate-900 max-w-[220px] sm:max-w-none break-words text-xs">
+                            <td className="py-2 px-2 sm:py-2.5 sm:px-3 font-semibold text-slate-900 break-words max-w-[140px] sm:max-w-none">
                               {item.description || 'Beauty / Esthetic Supply Item'}
                             </td>
-                            <td className="py-2.5 px-3 text-center font-bold text-slate-800 text-xs">
+                            <td className="py-2 px-2 sm:py-2.5 sm:px-3 text-center font-bold text-slate-800">
                               {item.quantity}
                             </td>
-                            <td className="py-2.5 px-3 text-right font-mono text-slate-600 text-xs whitespace-nowrap">
+                            <td className="py-2 px-2 sm:py-2.5 sm:px-3 text-right font-mono text-slate-600 whitespace-nowrap">
                               {formatCurrency(item.unitPrice, currency)}
                             </td>
-                            <td className="py-2.5 px-3 text-right font-mono font-bold text-slate-900 text-xs whitespace-nowrap min-w-[120px]">
+                            <td className="py-2 px-2 sm:py-2.5 sm:px-3 text-right font-mono font-bold text-slate-900 whitespace-nowrap">
                               {formatCurrency(lineTotal, currency)}
                             </td>
                           </tr>
