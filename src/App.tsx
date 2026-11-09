@@ -265,13 +265,20 @@ export default function App() {
       e.stopPropagation();
     }
     const now = Date.now();
-    if (now - downloadLockRef.current < 2500 || isGeneratingPDF) {
-      console.warn('PDF generation throttled to prevent duplicate tap/click on mobile.');
+    if (now - downloadLockRef.current < 800 || isGeneratingPDF) {
+      console.warn('PDF generation throttled to prevent duplicate tap/click.');
       return null;
     }
     downloadLockRef.current = now;
     setIsGeneratingPDF(true);
     showToast('Preparing official PDF receipt document...');
+
+    // If on mobile editor tab, switch to preview tab so #receipt-paper is visible in DOM layout
+    const wasEditorTab = activeTab === 'editor';
+    if (wasEditorTab) {
+      setActiveTab('preview');
+      await new Promise((r) => setTimeout(r, 150));
+    }
 
     const sourceElement = document.getElementById('receipt-paper');
     if (!sourceElement) {
@@ -282,36 +289,6 @@ export default function App() {
 
     const safeOrderNum = (orderNumber || 'JD-2026-1001').replace(/[^a-zA-Z0-9_-]/g, '_');
     const fileName = `Josella_Dolls_Receipt_${safeOrderNum}.pdf`;
-
-    // Create a temporary 800px clone positioned at top-left origin (0,0) in document DOM space
-    // (This guarantees 100% complete capture of all receipt sections on mobile without clipping or blank pages)
-    const wrapper = document.createElement('div');
-    wrapper.style.position = 'absolute';
-    wrapper.style.left = '0';
-    wrapper.style.top = '0';
-    wrapper.style.width = '800px';
-    wrapper.style.backgroundColor = '#ffffff';
-    wrapper.style.zIndex = '-9999';
-    wrapper.style.pointerEvents = 'none';
-
-    const clone = sourceElement.cloneNode(true) as HTMLElement;
-    clone.style.width = '800px';
-    clone.style.margin = '0';
-    clone.style.padding = '32px';
-    clone.style.boxSizing = 'border-box';
-    clone.style.backgroundColor = '#ffffff';
-
-    // Ensure all tables inside clone are full width
-    clone.querySelectorAll('table').forEach((t) => {
-      (t as HTMLElement).style.width = '100%';
-      (t as HTMLElement).style.minWidth = '0';
-    });
-
-    // Remove no-print elements from clone
-    clone.querySelectorAll('.no-print').forEach((el) => el.remove());
-
-    wrapper.appendChild(clone);
-    document.body.appendChild(wrapper);
 
     try {
       if (document.fonts) {
@@ -324,27 +301,28 @@ export default function App() {
 
       let imgData = '';
 
+      // Render live receipt preview element directly
       try {
-        imgData = await toPng(clone, {
+        imgData = await toPng(sourceElement, {
           quality: 0.98,
           pixelRatio: 2,
           backgroundColor: '#ffffff',
-          skipFonts: true
+          skipFonts: true,
+          filter: (node: any) => {
+            return !(node.classList && node.classList.contains('no-print'));
+          }
         });
       } catch (err1) {
-        console.warn('Primary clone toPng warning, using html2canvas fallback:', err1);
-        const canvas = await html2canvas(clone, {
+        console.warn('toPng direct render warning, using html2canvas fallback:', err1);
+        const canvas = await html2canvas(sourceElement, {
           scale: 2,
           useCORS: true,
           allowTaint: false,
           logging: false,
-          backgroundColor: '#ffffff'
+          backgroundColor: '#ffffff',
+          ignoreElements: (el) => Boolean(el.classList && el.classList.contains('no-print'))
         });
         imgData = canvas.toDataURL('image/jpeg', 0.98);
-      } finally {
-        if (wrapper.parentNode) {
-          wrapper.parentNode.removeChild(wrapper);
-        }
       }
 
       if (!imgData) {
@@ -388,17 +366,8 @@ export default function App() {
       showToast(`Receipt PDF ${fileName} ready!`);
       return pdfBlob;
     } catch (err: any) {
-      if (wrapper.parentNode) {
-        wrapper.parentNode.removeChild(wrapper);
-      }
       console.error('PDF Generation Error:', err);
-      showToast('Opening PDF Print Document...');
-
-      try {
-        window.print();
-      } catch (pErr) {
-        console.error('Print fallback error:', pErr);
-      }
+      showToast('Error generating PDF. Please try again.');
       return null;
     } finally {
       setIsGeneratingPDF(false);
